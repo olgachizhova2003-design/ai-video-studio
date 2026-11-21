@@ -23,10 +23,14 @@ class SupabaseStore:
         parsed=urlparse(url)
         if parsed.scheme!='https' or not parsed.hostname or not parsed.hostname.endswith('.supabase.co') or parsed.username or parsed.password:raise ValueError('SUPABASE_URL должен быть HTTPS адресом проекта *.supabase.co')
         self.url=url.rstrip('/');self.anon_key=anon_key;self.service_key=service_key;self.bucket=bucket
-    def http(self,path,method='GET',payload=None,auth=None,raw=None,mime=None,headers=None):
+    def auth_headers(self,auth=None):
         header={'apikey':self.anon_key if auth is not None else self.service_key}
-        if auth is None:header['Authorization']='Bearer '+self.service_key
+        # New sb_* API keys are not JWTs. The gateway authorizes them via apikey.
+        if auth is None and not self.service_key.startswith('sb_secret_'):header['Authorization']='Bearer '+self.service_key
         elif auth:header['Authorization']='Bearer '+auth
+        return header
+    def http(self,path,method='GET',payload=None,auth=None,raw=None,mime=None,headers=None):
+        header=self.auth_headers(auth)
         if raw is not None:data=raw;header['Content-Type']=mime or 'application/octet-stream'
         elif payload is not None:data=json.dumps(payload).encode();header['Content-Type']='application/json'
         else:data=None
@@ -65,7 +69,7 @@ class SupabaseStore:
         self.http('/storage/v1/object/'+quote(self.bucket,safe='')+'/'+name,'POST',raw=blob,mime=mime,headers={'x-upsert':'true'})
     def download(self,name):
         if not MEDIA_NAME.fullmatch(name):raise ValueError('Некорректное имя медиа')
-        header={'apikey':self.service_key,'Authorization':'Bearer '+self.service_key}
+        header=self.auth_headers()
         try:
             with urlopen(Request(self.url+'/storage/v1/object/authenticated/'+quote(self.bucket,safe='')+'/'+name,headers=header),timeout=45) as response:return response.read(25*1024*1024+1)
         except (HTTPError,URLError):raise CloudError('Не удалось получить сохранённый референс из Supabase Storage')

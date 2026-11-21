@@ -1,9 +1,11 @@
 import base64,copy,importlib.util,json,sys,unittest
+from unittest.mock import patch
+from io import BytesIO
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT))
-from app import create_app,CloudError
+from app import create_app,CloudError,SupabaseStore
 
 class FakeSupabase:
     def __init__(self):self.rows={};self.files={};self.auth_calls=[]
@@ -97,5 +99,22 @@ class OnlineAcceptance(unittest.TestCase):
         a=self.login(self.alice);b=self.login(self.bob,'bob@example.com');d=next(d for d in self.state(self.alice)['documents'] if d['id']=='cinematic-notes');self.state(self.bob)
         changed={**d,'content':d['content']+'\nA new line'};self.assertEqual(self.req(self.alice,'/api/document',changed,a).status_code,200)
         stale=self.req(self.bob,'/api/document',{**d,'content':'Stale edit'},b);self.assertEqual(stale.status_code,409)
+
+class SupabaseKeyCompatibility(unittest.TestCase):
+    def test_modern_keys_work_on_data_auth_and_storage_requests_without_a_fake_jwt(self):
+        store=SupabaseStore('https://project.supabase.co','sb_publishable_test_only','sb_secret_test_only');sent=[]
+        def respond(req,timeout=None):
+            sent.append(req)
+            return BytesIO(b'example-media' if '/authenticated/' in req.full_url else b'[]')
+        with patch('app.urlopen',side_effect=respond):
+            store.all('documents');store.signin('alice@example.com','test-only');store.user('user-jwt-test-only');store.download('a'*32+'.png')
+        self.assertEqual([r.get_header('Apikey') for r in sent],['sb_secret_test_only','sb_publishable_test_only','sb_publishable_test_only','sb_secret_test_only'])
+        self.assertEqual([r.get_header('Authorization') for r in sent],[None,None,'Bearer user-jwt-test-only',None])
+        self.assertTrue(all(r.get_method()=='GET' for r in [sent[0],sent[2],sent[3]]))
+    def test_legacy_keys_keep_the_required_service_role_bearer_header(self):
+        store=SupabaseStore('https://project.supabase.co','legacy-anon-test-only','legacy-service-test-only');sent=[]
+        def respond(req,timeout=None):sent.append(req);return BytesIO(b'media' if '/authenticated/' in req.full_url else b'[]')
+        with patch('app.urlopen',side_effect=respond):store.all('documents');store.download('b'*32+'.jpg')
+        self.assertTrue(all(r.get_header('Authorization')=='Bearer legacy-service-test-only' for r in sent))
 
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -22,9 +22,9 @@
 2. В **SQL Editor → New query** вставьте весь файл [supabase.sql](supabase.sql) и нажмите **Run**. Он создаст таблицу и закрытое хранилище `studio-media`.
 3. В **Authentication → Users → Add user → Create new user** создайте два аккаунта: ваш email и email подруги, каждый со своим паролем. Включите **Auto Confirm User**, чтобы можно было войти сразу. Если переключатель отсутствует, подтвердите адреса штатным способом в Supabase. Пароли используйте только для входа в студию.
 4. В настройках **Authentication** отключите **Allow new users to sign up**. В некоторых версиях панели этот пункт находится в **Sign In / Providers → Email**. Email/password должен оставаться включённым; публичная регистрация студии не нужна.
-5. В **Project Settings → API Keys** найдите вкладку **Legacy anon, service_role API keys**. Для этой версии нужны именно legacy-ключи `anon` и `service_role`, начинающиеся с `eyJ…`. Новый `sb_secret_…` в это поле не вставляйте. Адрес **Project URL** вида `https://xxxx.supabase.co` есть в **Connect** или настройках **Data API**.
+5. В **Project Settings → API Keys** найдите **Publishable key** (`sb_publishable_…`) и существующий **Secret key** (`sb_secret_…`, кнопка Reveal API key). Приложение поддерживает новые ключи и прежние legacy `anon`/`service_role` (`eyJ…`). Предпочтительны новые: панель Supabase предупреждает о прекращении поддержки legacy в начале 2027 года. Адрес **Project URL** вида `https://xxxx.supabase.co` есть в **Connect** или настройках **Data API**.
 
-Ключ `service_role` открывает серверу доступ к данным. Вставляйте его только в настройки Render из следующего шага. Не публикуйте ключи в GitHub, переписке или скриншотах.
+Secret key (или legacy `service_role`) открывает серверу доступ к данным. Вставляйте его только в настройки Render из следующего шага. Не публикуйте ключи в GitHub, переписке или скриншотах.
 
 ### 2. Подключите Render
 
@@ -35,8 +35,8 @@ Render прочитает [render.yaml](render.yaml). Проверьте **plan:
 | Поле | Что вставить |
 | --- | --- |
 | `SUPABASE_URL` | Project URL из Supabase, без `/rest/v1` |
-| `SUPABASE_ANON_KEY` | Legacy `anon` key того же проекта |
-| `SUPABASE_SERVICE_ROLE_KEY` | Legacy `service_role` key того же проекта |
+| `SUPABASE_ANON_KEY` | Publishable key того же проекта (либо legacy `anon`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Secret key того же проекта (либо legacy `service_role`) |
 | `STUDIO_ALLOWED_EMAILS` | Два email созданных аккаунтов через запятую |
 
 `APP_SECRET` и `STUDIO_MASTER_KEY` Blueprint сгенерирует сам. Не меняйте `STUDIO_MASTER_KEY` после сохранения ключей: без прежнего значения их нельзя расшифровать. Сохраните оба значения в своём менеджере паролей на случай переноса приложения.
@@ -72,7 +72,7 @@ Render прочитает [render.yaml](render.yaml). Проверьте **plan:
 | Render не запустился | Вкладку Logs. Все переменные должны быть заполнены; `APP_SECRET` и `STUDIO_MASTER_KEY` — от 32 символов. |
 | `Invalid login credentials` | Email и пароль именно пользователя **Authentication → Users**, а не пароль базы или аккаунта Render. |
 | Email не подтверждён | Подтвердите email пользователя в Supabase Auth. |
-| HTTP 401/403 от Supabase | Ключи `anon` и `service_role` должны быть legacy-ключами одного проекта. |
+| HTTP 401/403 от Supabase | Publishable/anon и secret/service_role должны быть ключами одного проекта; привилегированный ключ должен находиться в `SUPABASE_SERVICE_ROLE_KEY`. |
 | Нет таблицы или bucket | Выполните `supabase.sql` в том же проекте. |
 | Supabase недоступен | Проверьте, активен ли Free-проект и нет ли паузы после неактивности. |
 | Ошибка подключения AI | Смотрите полный текст ошибки в «Подключениях»: адрес, модель, баланс, доступ к API и ключ проверяются отдельно. Сервер устраняет браузерный CORS, но не меняет правила провайдера. |
