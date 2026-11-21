@@ -20,6 +20,9 @@ class CloudError(ValueError):
 
 class SupabaseStore:
     def __init__(self,url,anon_key,service_key,bucket='studio-media'):
+        url=url.strip();anon_key=anon_key.strip();service_key=service_key.strip()
+        if not anon_key or not service_key:raise ValueError('Заполните оба ключа Supabase в настройках сервера')
+        if any(re.search(r'[\s\x00-\x1f\x7f]',key) for key in [anon_key,service_key]):raise ValueError('Ключ Supabase содержит пробел или управляющий символ внутри значения. Скопируйте ключ заново.')
         parsed=urlparse(url)
         if parsed.scheme!='https' or not parsed.hostname or not parsed.hostname.endswith('.supabase.co') or parsed.username or parsed.password:raise ValueError('SUPABASE_URL должен быть HTTPS адресом проекта *.supabase.co')
         self.url=url.rstrip('/');self.anon_key=anon_key;self.service_key=service_key;self.bucket=bucket

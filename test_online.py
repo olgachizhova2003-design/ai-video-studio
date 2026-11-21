@@ -101,6 +101,17 @@ class OnlineAcceptance(unittest.TestCase):
         stale=self.req(self.bob,'/api/document',{**d,'content':'Stale edit'},b);self.assertEqual(stale.status_code,409)
 
 class SupabaseKeyCompatibility(unittest.TestCase):
+    def test_multiline_environment_values_are_normalized_before_first_authenticated_page(self):
+        store=SupabaseStore(' https://project.supabase.co\r\n',' sb_publishable_test_only\n','sb_secret_test_only\n');sent=[]
+        def respond(req,timeout=None):sent.append(req);return BytesIO(b'[]')
+        with patch('app.urlopen',side_effect=respond):store.all('profiles');store.all('documents')
+        self.assertEqual(store.url,'https://project.supabase.co')
+        self.assertTrue(all(r.get_header('Apikey')=='sb_secret_test_only' for r in sent))
+        self.assertEqual(store.auth_headers('')['apikey'],'sb_publishable_test_only')
+    def test_invalid_internal_key_whitespace_is_rejected_without_disclosing_the_key(self):
+        key='sb_secret_private\npart'
+        with self.assertRaises(ValueError) as caught:SupabaseStore('https://project.supabase.co','sb_publishable_test_only',key)
+        self.assertNotIn(key,str(caught.exception));self.assertNotIn('private',str(caught.exception))
     def test_modern_keys_work_on_data_auth_and_storage_requests_without_a_fake_jwt(self):
         store=SupabaseStore('https://project.supabase.co','sb_publishable_test_only','sb_secret_test_only');sent=[]
         def respond(req,timeout=None):
