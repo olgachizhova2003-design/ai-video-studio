@@ -1,0 +1,604 @@
+{
+  "profiles": [
+    {
+      "id": "seedance-i2v",
+      "name": "Seedance 2.5",
+      "mode": "Image to Video",
+      "provider": "atlas",
+      "endpoint": "https://api.atlascloud.ai/api/v1/model/generateVideo",
+      "model": "bytedance/seedance-2.5/image-to-video",
+      "contract": "i2v",
+      "system": "Animate the supplied first frame. Describe subject action, camera movement, lighting and temporal progression. Do not invent additional reference inputs.",
+      "user_instructions": "",
+      "roles": [
+        "First Frame",
+        "Last Frame"
+      ],
+      "schema": {
+        "duration": {
+          "type": "integer",
+          "enum": [
+            -1,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30
+          ],
+          "default": 5
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        "ratio": {
+          "type": "string",
+          "enum": [
+            "adaptive"
+          ],
+          "default": "adaptive"
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "request_template": {
+        "model": "bytedance/seedance-2.5/image-to-video",
+        "prompt": "$prompt",
+        "$merge": "$parameters",
+        "image": "$role.First Frame",
+        "last_image": "$role.Last Frame"
+      },
+      "poll_url": "https://api.atlascloud.ai/api/v1/model/prediction/{id}",
+      "version": 1,
+      "verified_at": "2026-11-21",
+      "status": "verified",
+      "source": "https://www.atlascloud.ai/docs/more-models/bytedance/seedance-2.5-image-to-video/generateVideo"
+    },
+    {
+      "id": "seedance-r2v",
+      "name": "Seedance 2.5",
+      "mode": "Reference to Video",
+      "provider": "atlas",
+      "endpoint": "https://api.atlascloud.ai/api/v1/model/generateVideo",
+      "model": "bytedance/seedance-2.5/reference-to-video",
+      "contract": "r2v",
+      "system": "Create a new video using references in their assigned roles. Describe original action and camera movement. Do not ask to edit or extend an input video.",
+      "user_instructions": "",
+      "roles": [
+        "Main Character",
+        "Environment",
+        "Outfit Reference",
+        "Style Reference",
+        "Motion Reference",
+        "Audio Reference"
+      ],
+      "schema": {
+        "duration": {
+          "type": "integer",
+          "enum": [
+            -1,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30
+          ],
+          "default": 5
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        "ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+            "21:9",
+            "adaptive"
+          ],
+          "default": "16:9"
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "request_template": {
+        "model": "bytedance/seedance-2.5/reference-to-video",
+        "prompt": "$prompt",
+        "$merge": "$parameters",
+        "reference_images": "$images",
+        "reference_videos": "$videos",
+        "reference_audios": "$audios",
+        "omni_reference_task_type": "reference"
+      },
+      "poll_url": "https://api.atlascloud.ai/api/v1/model/prediction/{id}",
+      "version": 1,
+      "verified_at": "2026-11-21",
+      "status": "verified",
+      "source": "https://www.atlascloud.ai/docs/more-models/bytedance/seedance-2.5-reference-to-video/generateVideo"
+    },
+    {
+      "id": "genjutsu-motion",
+      "name": "Genjutsu",
+      "mode": "Motion Transfer",
+      "provider": "nano",
+      "endpoint": "https://api.nanoapi.ai/v1/tasks",
+      "model": "genjutsu-1.0",
+      "contract": "motion",
+      "system": "Transfer motion from the source video to the subject in reference images. Preserve the intended timing.",
+      "user_instructions": "",
+      "roles": [
+        "Main Character",
+        "Environment",
+        "Style Reference",
+        "Motion Reference"
+      ],
+      "schema": {
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        }
+      },
+      "request_template": {
+        "model": "genjutsu-1.0",
+        "prompt": "$prompt",
+        "$merge": "$parameters",
+        "mode": "motion_control",
+        "image_urls": "$images",
+        "video_url": "$videos.0"
+      },
+      "poll_url": "https://api.nanoapi.ai/v1/tasks/{id}",
+      "version": 1,
+      "verified_at": "2026-11-21",
+      "status": "verified",
+      "source": "https://nanoapi.ai/docs/genjutsu"
+    },
+    {
+      "id": "genjutsu-swap",
+      "name": "Genjutsu",
+      "mode": "Object Swap",
+      "provider": "nano",
+      "endpoint": "https://api.nanoapi.ai/v1/tasks",
+      "model": "genjutsu-1.0",
+      "contract": "swap",
+      "system": "Replace the target object using reference images. Preserve the source camera, timing, motion and scene continuity.",
+      "user_instructions": "",
+      "roles": [
+        "Replacement Object",
+        "Style Reference",
+        "Motion Reference"
+      ],
+      "schema": {
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        }
+      },
+      "request_template": {
+        "model": "genjutsu-1.0",
+        "prompt": "$prompt",
+        "$merge": "$parameters",
+        "mode": "replace_object",
+        "image_urls": "$images",
+        "video_url": "$videos.0"
+      },
+      "poll_url": "https://api.nanoapi.ai/v1/tasks/{id}",
+      "version": 1,
+      "verified_at": "2026-11-21",
+      "status": "verified",
+      "source": "https://nanoapi.ai/docs/genjutsu"
+    },
+    {
+      "id": "hf-seedance-i2v",
+      "name": "Seedance 2.5 · Higgsfield",
+      "mode": "Image to Video",
+      "provider": "higgsfield",
+      "endpoint": "https://api.higgsfield.ai/bytedance/seedance-2.5/image-to-video",
+      "model": "bytedance/seedance-2.5/image-to-video",
+      "contract": "i2v",
+      "system": "Animate the supplied first frame. Describe subject action, camera movement, lighting and temporal progression. Do not invent additional reference inputs.",
+      "user_instructions": "",
+      "roles": [
+        "First Frame",
+        "Last Frame"
+      ],
+      "schema": {
+        "duration": {
+          "type": "integer",
+          "enum": [
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30
+          ],
+          "default": 5
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "default": true
+        },
+        "bitrate_mode": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "high"
+          ],
+          "default": "high"
+        }
+      },
+      "request_template": {
+        "prompt": "$prompt",
+        "$merge": "$parameters",
+        "image_url": "$role.First Frame",
+        "end_image_url": "$role.Last Frame"
+      },
+      "poll_url": "https://api.higgsfield.ai/requests/{id}/status",
+      "version": 1,
+      "verified_at": "2026-11-21",
+      "status": "verified",
+      "source": "https://docs.higgsfield.ai/docs/models/seedance-2-5/image-to-video.md"
+    },
+    {
+      "id": "hf-seedance-r2v",
+      "name": "Seedance 2.5 · Higgsfield",
+      "mode": "Reference to Video",
+      "provider": "higgsfield",
+      "endpoint": "https://api.higgsfield.ai/bytedance/seedance-2.5/reference-to-video",
+      "model": "bytedance/seedance-2.5/reference-to-video",
+      "contract": "r2v",
+      "system": "Create a new video using references in their assigned roles. Describe original action and camera movement. Do not ask to edit or extend an input video.",
+      "user_instructions": "",
+      "roles": [
+        "Main Character",
+        "Environment",
+        "Outfit Reference",
+        "Style Reference",
+        "Motion Reference",
+        "Audio Reference"
+      ],
+      "schema": {
+        "duration": {
+          "type": "integer",
+          "enum": [
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30
+          ],
+          "default": 5
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "default": true
+        },
+        "bitrate_mode": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "high"
+          ],
+          "default": "high"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+            "21:9"
+          ],
+          "default": "16:9"
+        }
+      },
+      "request_template": {
+        "prompt": "$prompt",
+        "$merge": "$parameters",
+        "image_urls": "$images",
+        "video_urls": "$videos",
+        "audio_urls": "$audios"
+      },
+      "poll_url": "https://api.higgsfield.ai/requests/{id}/status",
+      "version": 1,
+      "verified_at": "2026-11-21",
+      "status": "verified",
+      "source": "https://docs.higgsfield.ai/docs/models/seedance-2-5/reference-to-video.md"
+    },
+    {
+      "id": "hf-genjutsu-motion",
+      "name": "Genjutsu · Higgsfield",
+      "mode": "Motion Transfer",
+      "provider": "higgsfield",
+      "endpoint": "https://api.higgsfield.ai/higgsfield/genjutsu/motion-transfer/v1.0",
+      "model": "higgsfield/genjutsu/motion-transfer/v1.0",
+      "contract": "motion",
+      "system": "Transfer motion from the source video to the subject in reference images. Preserve the intended timing.",
+      "user_instructions": "",
+      "roles": [
+        "Main Character",
+        "Environment",
+        "Style Reference",
+        "Motion Reference"
+      ],
+      "schema": {
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        }
+      },
+      "request_template": {
+        "prompt": "$prompt",
+        "$merge": "$parameters",
+        "image_urls": "$images",
+        "video_url": "$videos.0"
+      },
+      "poll_url": "https://api.higgsfield.ai/requests/{id}/status",
+      "version": 1,
+      "verified_at": "2026-11-21",
+      "status": "verified",
+      "source": "https://docs.higgsfield.ai/docs/models/genjutsu/motion-transfer.md"
+    },
+    {
+      "id": "hf-genjutsu-swap",
+      "name": "Genjutsu · Higgsfield",
+      "mode": "Object Swap",
+      "provider": "higgsfield",
+      "endpoint": "https://api.higgsfield.ai/higgsfield/genjutsu/object-swap/v1.0",
+      "model": "higgsfield/genjutsu/object-swap/v1.0",
+      "contract": "swap",
+      "system": "Replace the target object using reference images. Preserve the source camera, timing, motion and scene continuity.",
+      "user_instructions": "",
+      "roles": [
+        "Replacement Object",
+        "Style Reference",
+        "Motion Reference"
+      ],
+      "schema": {
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        }
+      },
+      "request_template": {
+        "prompt": "$prompt",
+        "$merge": "$parameters",
+        "image_urls": "$images",
+        "video_url": "$videos.0"
+      },
+      "poll_url": "https://api.higgsfield.ai/requests/{id}/status",
+      "version": 1,
+      "verified_at": "2026-11-21",
+      "status": "verified",
+      "source": "https://docs.higgsfield.ai/docs/models/genjutsu/object-swap.md"
+    }
+  ],
+  "documents": [
+    {
+      "id": "seedance-frames",
+      "title": "Seedance · первый и последний кадр",
+      "profiles": [
+        "seedance-i2v"
+      ],
+      "source": "https://www.atlascloud.ai/docs/more-models/bytedance/seedance-2.5-image-to-video/generateVideo",
+      "category": "Official Documentation",
+      "content": "# Кадры\nПервый кадр обязателен. Последний кадр необязателен. Роли First Frame и Last Frame передаются отдельными полями image и last_image.\n# Параметры\nДлительность: 4–30 секунд или -1 (авто). Формат adaptive сохраняет пропорции изображения.\n# Визуальные данные\nИзображения: 300–6000 px, пропорции 0.4–2.5, до 30 MB. В интерфейсе доступно консервативное подмножество разрешений: 480p, 720p, 1080p.",
+      "enabled": true,
+      "version": 1,
+      "updated_at": "2026-11-21T12:55:41.285827+00:00",
+      "created_at": "2026-11-21T12:55:41.285857+00:00"
+    },
+    {
+      "id": "seedance-refs",
+      "title": "Seedance · роли референсов",
+      "profiles": [
+        "seedance-r2v"
+      ],
+      "source": "https://www.atlascloud.ai/docs/more-models/bytedance/seedance-2.5-reference-to-video/generateVideo",
+      "category": "Official Documentation",
+      "content": "# Референсы\nДо 30 изображений, 10 видео и 10 аудио. В промпте используются @Image1, @Video1 и @Audio1 в порядке отправки.\n# Новая сцена\nЭтот профиль создаёт новое видео. Редактирование и продолжение исходного видео требуют отдельного профиля с другими ограничениями.\n# Медиа\nСуммарная длительность видео до 30 секунд, аудио до 30 секунд. Для удалённых видео и аудио локальный валидатор требует вручную проверенные метаданные.",
+      "enabled": true,
+      "version": 1,
+      "updated_at": "2026-11-21T12:55:41.302832+00:00",
+      "created_at": "2026-11-21T12:55:41.302851+00:00"
+    },
+    {
+      "id": "genjutsu-guide",
+      "title": "Genjutsu · движение и замена",
+      "profiles": [
+        "genjutsu-motion",
+        "genjutsu-swap"
+      ],
+      "source": "https://nanoapi.ai/docs/genjutsu",
+      "category": "Official Documentation",
+      "content": "# Режимы\nmotion_control переносит движение. replace_object заменяет объект. Эти режимы передаются отдельным полем mode.\n# Входы\nОдин исходный видеоклип и от 1 до 20 изображений. Нужны прямые публичные URL: локальные файлы и Base64 не поддерживаются провайдером.\n# Ограничения\nДо 30 секунд исходного видео; для замены объекта — от 4 секунд. Промпт до 5000 символов. Разрешение: 480p, 720p, 1080p.",
+      "enabled": true,
+      "version": 1,
+      "updated_at": "2026-11-21T12:55:41.319677+00:00",
+      "created_at": "2026-11-21T12:55:41.319694+00:00"
+    },
+    {
+      "id": "cinematic-notes",
+      "title": "Режиссёрская памятка",
+      "profiles": [
+        "seedance-i2v",
+        "seedance-r2v",
+        "genjutsu-motion",
+        "genjutsu-swap",
+        "hf-seedance-i2v",
+        "hf-seedance-r2v",
+        "hf-genjutsu-motion",
+        "hf-genjutsu-swap"
+      ],
+      "source": "Встроенная авторская памятка",
+      "category": "Prompting Guide",
+      "content": "# Композиция\nОпишите героя и его действие, затем окружение.\n# Камера\nВыберите одно основное движение камеры: наезд, панорама или неподвижный план.\n# Свет и ритм\nУкажите характер света, палитру и развитие действия во времени. Избегайте противоречивых указаний.",
+      "enabled": true,
+      "version": 1,
+      "updated_at": "2026-11-21T12:55:41.338831+00:00",
+      "created_at": "2026-11-21T12:55:41.338848+00:00"
+    },
+    {
+      "id": "higgsfield-api",
+      "title": "Higgsfield API · отдельные подключения",
+      "profiles": [
+        "hf-seedance-i2v",
+        "hf-seedance-r2v",
+        "hf-genjutsu-motion",
+        "hf-genjutsu-swap"
+      ],
+      "source": "https://docs.higgsfield.ai/docs/models/video-generation.md",
+      "category": "Official Documentation",
+      "content": "# Подключение\nОтдельный API с Key ID и Secret. Адрес API: https://api.higgsfield.ai. Подписочные кредиты сайта не используются.\n# Медиа\nПрофили используют публичные URL. Genjutsu: одно видео от 4 до 30 секунд и 1–8 изображений.\n# Результат\nПосле отправки сохраняется request_id; опрос status_url возвращает статус и video.url.\n# Промпт\nПодготовьте запрос для выбранного режима, учитывая роли референсов и схему параметров профиля.",
+      "enabled": true,
+      "version": 1,
+      "updated_at": "2026-11-21T12:55:41.409655+00:00",
+      "created_at": "2026-11-21T12:55:41.409672+00:00"
+    }
+  ]
+}
