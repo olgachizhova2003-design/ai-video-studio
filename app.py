@@ -155,7 +155,7 @@ def create_app(config=None,store=None):
         for section in sections:
             if section['document_id'] not in seen:first.append(section);seen.add(section['document_id'])
         return [{k:v for k,v in section.items() if k!='score'} for section in (first+[s for s in sections if s not in first])[:limit]]
-    engine.save_document=save_document;engine.context=context
+    engine.save_document=save_document;engine.context=engine.knowledge.context
     original_director=engine.director
     def hydrate(filename):
         if not MEDIA_NAME.fullmatch(filename):raise ValueError('Некорректное имя медиа')
@@ -206,6 +206,7 @@ def create_app(config=None,store=None):
             existing={d['id'] for d in store.all('documents')}
             for d in seed_data['documents']:
                 if d['id'] not in existing:store.put('documents',d)
+            engine.knowledge.migrate()
             seeded=True
     ready_users=set()
     def user_defaults():

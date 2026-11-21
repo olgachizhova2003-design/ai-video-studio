@@ -1,0 +1,10 @@
+.ke-tabs{flex-wrap:wrap;margin-bottom:20px;border:1px solid var(--border,#dedfcb);border-radius:14px;background:var(--panel,#fffdf5)}
+.ke-tabs button{white-space:nowrap;flex:1}.ke-toolbar{flex-wrap:wrap;gap:10px}.ke-toolbar input{flex:2;min-width:190px}.ke-toolbar select{flex:1;min-width:150px}
+.ke-cards{align-items:start}.ke-example-card h2{margin-top:10px}.ke-example-card .card-actions{flex-wrap:wrap;gap:8px}.ke-example-card .card-actions .btn{flex:1;white-space:normal;min-width:130px}
+.ke-prompt{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7;padding:16px;background:rgba(164,172,119,.1);border:1px solid var(--border,#dedfcb);border-radius:10px;max-height:440px;overflow:auto;color:var(--ink,#38402d)}
+.ke-details{margin:15px 0}.ke-details summary{cursor:pointer;color:var(--olive,#697348);font-weight:600}.ke-details p{font-size:13px;line-height:1.7}
+.ke-reference-list{display:flex;flex-wrap:wrap;gap:6px;font-size:11px;color:var(--muted,#858875)}.ke-reference-list span{border-radius:6px;padding:5px 7px;background:rgba(225,157,171,.13)}
+.ke-reader{line-height:1.85}.ke-reader h2{font-size:25px;margin-top:32px}.ke-reader h3{font-size:20px;margin-top:25px}.ke-reader p{white-space:pre-wrap;overflow-wrap:anywhere}.ke-reader pre{max-height:none}
+.ke-comparison{display:grid;grid-template-columns:1fr 1fr;gap:18px}.ke-comparison section{min-width:0}.ke-comparison h3,.ke-anatomy h3,.ke-context-item h3{font-size:16px;margin:10px 0}.ke-anatomy{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}.ke-anatomy section{padding:15px;border:1px solid var(--border,#dedfcb);border-radius:12px}.ke-anatomy p{white-space:pre-wrap}
+.ke-result-tools,.ke-idea-tools{padding:20px 24px;border-top:1px solid var(--border,#dedfcb)}.ke-idea-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.ke-context-item{border-bottom:1px solid var(--border,#dedfcb);padding:10px 0 18px}
+@media(max-width:700px){.ke-comparison,.ke-anatomy{grid-template-columns:1fr}.ke-tabs button{font-size:12px;padding:12px 8px}.ke-toolbar select{min-width:130px}.ke-result-tools,.ke-idea-tools{padding:15px}.ke-prompt{font-size:12px}}

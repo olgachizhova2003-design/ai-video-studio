@@ -49,7 +49,7 @@ class OnlineAcceptance(unittest.TestCase):
     def test_02_only_two_allowlisted_accounts_can_sign_in(self):
         csrf=self.req(self.alice,'/auth/csrf').json['csrf'];r=self.req(self.alice,'/auth/login',{'email':'outsider@example.com','password':'test-password-only'},csrf)
         self.assertEqual(r.status_code,403);self.assertEqual(self.store.auth_calls,[])
-        self.login(self.alice);s=self.state(self.alice);self.assertEqual(s['user']['email'],'alice@example.com');self.assertEqual(len(s['profiles']),8)
+        self.login(self.alice);s=self.state(self.alice);self.assertEqual(s['user']['email'],'alice@example.com');self.assertEqual(len(s['profiles']),10)
     def test_03_password_failures_and_csrf_are_enforced(self):
         self.assertEqual(self.req(self.alice,'/auth/login',{'email':'alice@example.com','password':'bad'}).status_code,403)
         csrf=self.req(self.alice,'/auth/csrf').json['csrf'];r=self.req(self.alice,'/auth/login',{'email':'alice@example.com','password':'bad'},csrf);self.assertEqual(r.status_code,400)
