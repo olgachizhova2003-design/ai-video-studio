@@ -8,7 +8,8 @@ from urllib.parse import quote,urlencode,urlparse
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
 from cryptography.fernet import Fernet,InvalidToken
-from flask import Flask,Response,abort,g,jsonify,redirect,request,send_from_directory,session
+from flask import Flask,Response,abort,g,jsonify,redirect,request,send_from_directory,send_file,session
+from media_cache import MediaCache
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 ROOT=Path(__file__).resolve().parent
@@ -62,6 +63,14 @@ class SupabaseStore:
             rows=self.http('/rest/v1/studio_objects?'+query);result.extend(row['body'] for row in rows)
             if len(rows)<500:return result
             offset+=500
+    def snapshot(self,kinds):
+        result={kind:[] for kind in kinds};offset=0
+        while True:
+            query=urlencode({'kind':'in.('+','.join(json.dumps(k) for k in kinds)+')','select':'kind,body','order':'created_at.asc,id.asc','limit':'500','offset':str(offset)})
+            rows=self.http('/rest/v1/studio_objects?'+query)
+            for row in rows:result[row['kind']].append(row['body'])
+            if len(rows)<500:return result
+            offset+=500
     def put(self,kind,item):
         self.http('/rest/v1/studio_objects?on_conflict=kind,id','POST',{'kind':kind,'id':item['id'],'body':item},headers={'Prefer':'resolution=merge-duplicates,return=minimal'})
         return copy.deepcopy(item)
@@ -107,14 +116,34 @@ def create_app(config=None,store=None):
     spec=importlib.util.spec_from_file_location('cloud_engine_'+uuid.uuid4().hex,ROOT/'engine.py');engine=importlib.util.module_from_spec(spec);spec.loader.exec_module(engine)
     engine.DATA=Path(tempfile.mkdtemp(prefix='video-studio-cache-'));(engine.DATA/'media').mkdir()
     who=ContextVar('studio-user',default=None);init_lock=threading.RLock();seeded=False
+    media_cache=MediaCache(store,engine.DATA/'previews');ref_lock=threading.RLock();ref_cache={'until':0,'items':[]}
+    identity_lock=threading.RLock();identity_cache={}
+    asset_versions={file.name:hashlib.sha256(file.read_bytes()).hexdigest()[:12] for file in (ROOT/'static').iterdir() if file.is_file()}
     def scope(kind):
         user=who.get()
         if kind in PRIVATE_KINDS:
             if not user:raise ValueError('Для личных данных требуется вход')
             return kind+':'+user['id']
         return kind
-    def get(kind,id_):return store.get(scope(kind),id_)
-    def all_items(kind):return store.all(scope(kind))
+    def get(kind,id_):
+        key=scope(kind)
+        if hasattr(g,'studio_snapshot') and key in g.studio_snapshot:
+            item=next((x for x in g.studio_snapshot[key] if x['id']==id_),None)
+            if item is None:raise ValueError('Запись не найдена')
+            return copy.deepcopy(item)
+        return store.get(key,id_)
+    def all_items(kind):
+        key=scope(kind)
+        if hasattr(g,'studio_snapshot') and key in g.studio_snapshot:return copy.deepcopy(g.studio_snapshot[key])
+        return store.all(key)
+    def media_references():
+        with ref_lock:
+            if time.monotonic()>=ref_cache['until']:
+                ref_cache.update(items=store.all('references'),until=time.monotonic()+10)
+            return ref_cache['items']
+    def invalidate_references():
+        with ref_lock:ref_cache['until']=0
+
     def put(kind,item):
         item=copy.deepcopy(item);user=who.get()
         if kind in ['jobs','history'] and user:item.setdefault('owner_id',user['id']);item.setdefault('created_by',user.get('name') or user['email'])
@@ -127,13 +156,15 @@ def create_app(config=None,store=None):
                 file=engine.DATA/'media'/filename
                 if filename not in old_files and file.is_file():
                     store.upload(filename,file.read_bytes(),mimetypes.guess_type(file)[0] or 'application/octet-stream');file.unlink(missing_ok=True)
-        return store.put(scope(kind),item)
+        result=store.put(scope(kind),item)
+        if kind=='references':invalidate_references()
+        return result
     def delete(kind,id_):
         if kind=='references':
             r=get(kind,id_);other_refs=[x for x in all_items('references') if x['id']!=id_]
             used={name for ref in other_refs for name in ([ref['file']] if ref.get('file') else [])+ref.get('frames',[])}
             names=[name for name in ([r['file']] if r.get('file') else [])+r.get('frames',[]) if name not in used]
-            store.remove_files(names)
+            store.remove_files(names);media_cache.remove(names);invalidate_references()
         return store.delete(scope(kind),id_)
     engine.get=get;engine.all_items=all_items;engine.put=put;engine.delete=delete
     engine.protect=lambda value,decrypt=False:cipher.decrypt(value.encode()).decode() if decrypt else cipher.encrypt(value.encode()).decode()
@@ -183,7 +214,7 @@ def create_app(config=None,store=None):
                         (engine.DATA/'media'/filename).unlink(missing_ok=True);del cache_readers[filename]
     engine.director=director
     original_reference_value=engine.reference_value
-    engine.reference_value=lambda r,p:store.signed_url(r['file']) if r.get('file') and not r.get('remote_url') else original_reference_value(r,p)
+    engine.reference_value=lambda r,p:media_cache.signed_url(r['file'],86400) if r.get('file') and not r.get('remote_url') else original_reference_value(r,p)
     original_api_request=engine.api_request
     def cloud_api_request(url,*args,**kwargs):
         parsed=urlparse(url)
@@ -225,7 +256,14 @@ def create_app(config=None,store=None):
         if not tokens:return None
         try:
             if tokens['expires_at']<time.time()+90:tokens=store.refresh(tokens['refresh_token']);session['auth']=sealed_session(tokens)
-            user=store.user(tokens['access_token'])
+            token_hash=hashlib.sha256(tokens['access_token'].encode()).hexdigest()
+            with identity_lock:
+                cached=identity_cache.get(token_hash)
+                if cached and cached[0]>time.monotonic():user=copy.deepcopy(cached[1])
+                else:
+                    user=store.user(tokens['access_token'])
+                    if len(identity_cache)>=128:identity_cache.clear()
+                    identity_cache[token_hash]=(time.monotonic()+20,copy.deepcopy(user))
         except CloudError as error:
             if error.status in [400,401,403]:session.clear();return None
             raise
@@ -243,13 +281,20 @@ def create_app(config=None,store=None):
             if request.headers.get('Origin') and request.headers['Origin']!=request.host_url.rstrip('/'):return jsonify(error='Внешний Origin запрещён'),403
             if request.headers.get('X-Studio-Request')!='local' or not secrets.compare_digest(request.headers.get('X-CSRF-Token',''),session.get('csrf','')):return jsonify(error='Проверка CSRF не пройдена. Обновите страницу.'),403
         if request.path.startswith('/api/relay'):return jsonify(error='Онлайн-студия не предоставляет открытый proxy'),404
+        if request.path.startswith('/media/'):return
         seed();user_defaults()
     @app.teardown_request
     def clear_context(error):
         if hasattr(g,'user_context'):who.reset(g.user_context)
     @app.after_request
     def headers(response):
-        response.headers['Cache-Control']='no-store';response.headers['X-Content-Type-Options']='nosniff';response.headers['Referrer-Policy']='no-referrer';response.headers['X-Frame-Options']='DENY'
+        if request.path.startswith('/static/'):
+            name=request.path.rsplit('/',1)[-1]
+            immutable=request.args.get('v')==asset_versions.get(name) or name.endswith('.woff2')
+            response.headers['Cache-Control']='public, max-age=31536000, immutable' if immutable else 'public, max-age=0, must-revalidate'
+        elif request.path.startswith('/media/') and response.status_code in [200,302,304]:response.headers['Cache-Control']='private, max-age=300'
+        else:response.headers['Cache-Control']='no-store'
+        response.headers['X-Content-Type-Options']='nosniff';response.headers['Referrer-Policy']='no-referrer';response.headers['X-Frame-Options']='DENY'
         response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
         return response
     @app.errorhandler(CloudError)
@@ -275,15 +320,24 @@ def create_app(config=None,store=None):
     @app.get('/auth/me')
     def me():return jsonify(user=g.user,csrf=session['csrf'])
     @app.post('/auth/logout')
-    def logout():session.clear();return jsonify(ok=True)
+    def logout():
+        tokens=session_tokens()
+        if tokens:
+            with identity_lock:identity_cache.pop(hashlib.sha256(tokens['access_token'].encode()).hexdigest(),None)
+        session.clear();return jsonify(ok=True)
     @app.get('/static/<path:name>')
     def static_file(name):return send_from_directory(ROOT/'static',name)
     @app.get('/media/<name>')
     def media(name):
         if not MEDIA_NAME.fullmatch(name):abort(404)
-        references=all_items('references')
+        references=media_references()
         if not any(name==r.get('file') or name in r.get('frames',[]) for r in references):abort(404)
-        return redirect(store.signed_url(name,3600))
+        if request.args.get('preview')=='1':
+            try:
+                file=media_cache.preview(name)
+                return send_file(file,mimetype='image/webp',conditional=True,etag='preview-v1-'+name)
+            except ValueError:return redirect(media_cache.signed_url(name))
+        return redirect(media_cache.signed_url(name))
     class CloudHandler(engine.Handler):
         def authorized(self,write=False):pass # Flask above authenticates, authorizes Origin and checks CSRF.
         def send(self,data,status=200,mime='application/json; charset=utf-8'):
@@ -292,6 +346,16 @@ def create_app(config=None,store=None):
     @app.route('/',defaults={'path':''},methods=['GET'])
     @app.route('/api/<path:path>',methods=['GET','POST'])
     def engine_route(path):
+        if request.path=='/':
+            html=(ROOT/'static'/'index.html').read_text(encoding='utf-8')
+            for name,version in asset_versions.items():
+                if name.endswith(('.js','.css')):html=html.replace('/static/'+name+'"','/static/'+name+'?v='+version+'"')
+            return Response(html,content_type='text/html; charset=utf-8')
+        if path=='state' and request.method=='GET':
+            kinds=['profiles','documents','references','history','jobs','examples','workspace','settings','secrets']
+            scoped=[scope(kind) for kind in kinds]
+            g.studio_snapshot=store.snapshot(scoped) if hasattr(store,'snapshot') else {key:store.all(key) for key in scoped}
+            with ref_lock:ref_cache.update(items=g.studio_snapshot['references'],until=time.monotonic()+10)
         if request.path.startswith('/api/') and request.method=='POST':
             body=request.get_json(silent=True) or {}
             if path=='poll':

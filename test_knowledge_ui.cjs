@@ -7,8 +7,8 @@ const profiles=JSON.parse(fs.readFileSync(path.join(root,'seed-data.json'),'utf8
 const textProfile=structuredClone(profiles.find(p=>p.id==='hf-seedance-i2v'));Object.assign(textProfile,{id:'hf-seedance-t2v',mode:'Text to Video',contract:'t2v',roles:[]});profiles.push(textProfile);
 function mode(p){return p.contract;}
 const fixture={profiles,documents:pack.documents.map(d=>({...d,profiles:profiles.filter(p=>!d.modes.length||d.modes.includes(mode(p))).map(p=>p.id)})),examples:structuredClone(pack.examples),workspace:{id:'main',profile_id:textProfile.id,brief:'',parameters:{},reference_ids:[],messages:[],result:null},history:[],jobs:[],references:[],categories:['Official Documentation','Prompting Guide','Best Practices','User Instructions','Examples'],settings:{prompt:{url:'https://mock.example/v1',model:'mock-no-paid-requests'},video:{}},user:{email:'alice@example.com',name:'Alice'}};
-const calls=[];
-async function mockApi(route,body){calls.push({route,body:structuredClone(body)});if(route==='workspace')return body;if(route==='state')return fixture;if(route==='history')return {...body,id:'test-history',kind:'draft'};if(route==='example'){fixture.examples.push({...body,id:body.id||'new-user-example',generation_verified:false});return fixture.examples.at(-1);}if(route==='anatomy')return {before:body.prompt,after:body.prompt,profile_id:body.profile_id,anatomy:[{key:'subject',text:'Person',explanation:'Observed subject'}],changes:[],context:[]};if(route==='director')return {id:'mock-ai-result',result:{prompt:'A new restrained variation.',parameters:body.parameters,explanation:'Mock variation',profile_id:body.profile_id,warnings:[],context:[]}};if(route==='knowledge-backup')return {documents:[],profiles:[]};throw Error('Unexpected API call: '+route);}
+const calls=[];let holdWorkspace=false,releaseWorkspace;
+async function mockApi(route,body){calls.push({route,body:structuredClone(body)});if(route==='workspace'){if(holdWorkspace)return new Promise(resolve=>{releaseWorkspace=()=>resolve(body);});return body;}if(route==='state')return fixture;if(route==='history')return {...body,id:'test-history',kind:'draft'};if(route==='example'){fixture.examples.push({...body,id:body.id||'new-user-example',generation_verified:false});return fixture.examples.at(-1);}if(route==='anatomy')return {before:body.prompt,after:body.prompt,profile_id:body.profile_id,anatomy:[{key:'subject',text:'Person',explanation:'Observed subject'}],changes:[],context:[]};if(route==='director')return {id:'mock-ai-result',result:{prompt:'A new restrained variation.',parameters:body.parameters,explanation:'Mock variation',profile_id:body.profile_id,warnings:[],context:[]}};if(route==='knowledge-backup')return {documents:[],profiles:[]};throw Error('Unexpected API call: '+route);}
 class TestFormData{constructor(form){this.values=new Map(Object.entries(form.values||{}));}get(key){return this.values.get(key)??null;}has(key){return this.values.has(key);}getAll(key){return [].concat(this.get(key)||[]);}}
 const sandbox={document,window:{addEventListener(){},location:{assign(){}}},navigator:{clipboard:{writeText:async()=>{}}},URL:{createObjectURL:()=>'',revokeObjectURL(){}},Blob,structuredClone,FormData:TestFormData,setTimeout:()=>0,clearTimeout(){},mockApi,fixture};
 vm.createContext(sandbox);
@@ -19,6 +19,18 @@ const clickHandler=listeners.click.find(x=>x.capture).fn,submitHandler=listeners
 async function click(action,id=''){const button={dataset:{keAction:action,id},disabled:false};await clickHandler({target:{closest:selector=>selector==='[data-ke-action]'?button:null},preventDefault(){},stopImmediatePropagation(){}});}
 async function submit(id,dataset,values){await submitHandler({target:{id,dataset,values},submitter:{disabled:false},preventDefault(){},stopImmediatePropagation(){}});}
 (async()=>{
+  const navigation=listeners.click.find(x=>!x.capture).fn;
+  run('savedWorkspace=queuedWorkspace=JSON.stringify(S.workspace);');
+  const navEvent=v=>({target:{closest:selector=>selector==='[data-view]'?{dataset:{view:v}}:null}});
+  await navigation(navEvent('references'));assert.equal(calls.filter(x=>x.route==='workspace').length,0);
+  holdWorkspace=true;run("S.workspace.brief='A draft that must survive slow storage';");
+  await navigation(navEvent('profiles'));assert.equal(run('view'),'profiles');assert.ok(releaseWorkspace,'Save runs in the background');
+  await navigation(navEvent('references'));assert.equal(run('view'),'references');assert.equal(calls.filter(x=>x.route==='workspace').length,1);
+  releaseWorkspace();await run('saveQueue');holdWorkspace=false;
+  fixture.references=[{id:'image9',name:'Portrait',type:'image',file:'a'.repeat(32)+'.png',role:'First Frame',description:''},{id:'video8',name:'Motion',type:'video',file:'b'.repeat(32)+'.mp4',frames:['c'.repeat(32)+'.jpg'],role:'Motion Reference',description:''}];
+  const media=run('renderReferences()');assert.ok(media.includes('?preview=1')&&media.includes('loading="lazy"'));assert.ok(!media.includes('<video'),'Gallery does not start downloading original videos');
+  run("showRefEditor();");assert.ok(node('#modal').innerHTML.includes('<span>Изображение, видео или аудио</span>'));assert.ok(!node('#modal').innerHTML.includes('<div class="upload-progress"'));
+  fixture.references=[];fixture.workspace.brief='';run('savedWorkspace=queuedWorkspace=JSON.stringify(S.workspace);');
   run("view='knowledge';KE.tab='examples';");let html=run('renderKnowledge()');
   assert.equal((html.match(/ke-example-card/g)||[]).length,40);for(const label of ['Documents','Prompt Examples','Model Guides','Cinematography','My Instructions'])assert.ok(html.includes(label));
   assert.ok(html.includes('Использовать в студии')&&html.includes('Объяснить через AI')&&html.includes('Создать вариацию'));
