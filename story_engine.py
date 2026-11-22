@@ -51,10 +51,19 @@ class StoryEngine:
             item['characters'].append(char)
         ids=[c['id'] for c in item['characters']]
         if len(ids)!=len(set(ids)):raise ValueError('Повторяется ID персонажа')
-        item['assets']=self.assets(body.get('assets',[]),ids)
+        # Keep already-saved bindings even if a reference was later removed.
+        # Without this, one orphaned link prevents saving every other asset.
+        old_assets={}
+        if item.get('id'):
+            try:old_project=self.get('projects',item['id'])
+            except ValueError as exc:raise ValueError('Сериал не найден на сервере. Обновите раздел «Сценарий» и проверьте выбранный сериал.') from exc
+            old_assets={a['id']:a.get('reference_id','') for a in old_project.get('assets',[])}
+        item['assets']=self.assets(body.get('assets',[]),ids,old_assets)
         return self.save_version('projects',item,350000)
-    def assets(self,values,char_ids):
+    def assets(self,values,char_ids,old_assets=None):
         if not isinstance(values,list) or len(values)>300:raise ValueError('Допускается до 300 ассетов на сериал')
+        old_assets=old_assets or {}
+        available={r['id']:r for r in self.e.all_items('references')}
         result=[]
         for value in values:
             if not isinstance(value,dict) or value.get('kind') not in ASSET_KINDS:raise ValueError('Некорректный вид ассета')
@@ -62,9 +71,15 @@ class StoryEngine:
             if not a['name']:raise ValueError('Укажите название ассета')
             if a['character_id'] and a['character_id'] not in char_ids:raise ValueError('Персонаж ассета не найден')
             if a['reference_id']:
-                ref=self.e.get('references',a['reference_id'])
-                expected='video' if a['kind']=='motion' else 'audio' if a['kind']=='audio' else 'image'
-                if ref['type']!=expected:raise ValueError('Тип файла не подходит для ассета')
+                ref=available.get(a['reference_id'])
+                if ref is None:
+                    # Historic dangling links stay in the project for later repair.
+                    # A newly selected missing file is never accepted silently.
+                    if old_assets.get(a['id'])!=a['reference_id']:
+                        raise ValueError('Референс '+a['reference_id']+' для ассета «'+a['name']+'» не найден на сервере. Обновите «Референсы» и выберите существующий файл.')
+                else:
+                    expected='video' if a['kind']=='motion' else 'audio' if a['kind']=='audio' else 'image'
+                    if ref['type']!=expected:raise ValueError('Тип файла не подходит для ассета «'+a['name']+'»')
             result.append(a)
         ids=[a['id'] for a in result]
         if len(ids)!=len(set(ids)):raise ValueError('Повторяется ID ассета')
