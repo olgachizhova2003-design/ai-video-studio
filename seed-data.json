@@ -516,6 +516,62 @@
       "verified_at": "2026-11-21",
       "status": "verified",
       "source": "https://docs.higgsfield.ai/docs/models/genjutsu/object-swap.md"
+    },
+    {
+      "id": "elysium-seedance-i2v",
+      "name": "Seedance 2.5 · ElysiumAI",
+      "mode": "Image to Video",
+      "provider": "elysium",
+      "endpoint": "https://elysiumai.net/v1/videos",
+      "model": "bytedance/seedance-2.5",
+      "contract": "i2v",
+      "system": "Animate the supplied first frame without changing the subject or composition. Describe temporal actions, camera motion, lighting and continuity. A First Frame image is mandatory.",
+      "user_instructions": "",
+      "roles": [
+        "First Frame"
+      ],
+      "schema": {
+        "duration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 3
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:3",
+            "3:4"
+          ],
+          "default": "16:9"
+        }
+      },
+      "request_template": {
+        "model": "$model",
+        "operation": "image-to-video",
+        "prompt": "$prompt",
+        "image": "$role.First Frame",
+        "input": {
+          "$merge": "$parameters"
+        }
+      },
+      "poll_url": "https://elysiumai.net/v1/videos/{id}",
+      "version": 1,
+      "verified_at": "",
+      "status": "unverified",
+      "source": "https://elysiumai.net/docs/api/video"
     }
   ],
   "documents": [
@@ -599,6 +655,18 @@
       "version": 1,
       "updated_at": "2026-11-21T12:55:41.409655+00:00",
       "created_at": "2026-11-21T12:55:41.409672+00:00"
+    },
+    {
+      "id": "elysium-seedance-guide",
+      "title": "ElysiumAI · Seedance 2.5 · Image to Video",
+      "category": "Official Documentation",
+      "source": "https://elysiumai.net/docs/api/video",
+      "profiles": [
+        "elysium-seedance-i2v"
+      ],
+      "enabled": true,
+      "version": 1,
+      "content": "# Подключение\nElysiumAI: POST https://elysiumai.net/v1/videos, model bytedance/seedance-2.5, operation image-to-video. API-ключ сохраняется в разделе Video Providers.\n# Первый кадр\nДобавьте ровно одно изображение с ролью First Frame. В онлайне загруженный файл получает временную подписанную HTTPS-ссылку. Поле первого кадра и параметры сверяются с текущей схемой GET /v1/media/models до платной отправки.\n# Статус и результат\nGET /v1/videos/{id} возвращает статус; URL результата ищите в metadata.url. Ссылки могут истекать, сохраняйте готовый файл.\n# Ограничения\nТочные варианты длительности, разрешения и кадра определяются актуальной схемой image-to-video. Если схема не совпадает с параметрами студии, отправка блокируется. Подтверждение платного запроса обязательно."
     }
   ]
 }

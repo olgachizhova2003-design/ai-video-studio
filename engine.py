@@ -82,6 +82,24 @@ def seeds():
         else:
             p['endpoint']=HF_BASE+'/'+p['model'];p['schema']['aspect_ratio']={'type':'string','enum':['16:9','4:3','1:1','3:4','9:16','21:9'],'default':'16:9'}
         profiles.append(p)
+    # Elysium's video API is a different contract from Atlas/Higgsfield.
+    # Parameters and the first-frame field are checked against its live catalog
+    # before a paid task can be submitted.
+    profiles.append(dict(
+        id='elysium-seedance-i2v',name='Seedance 2.5 · ElysiumAI',
+        mode='Image to Video',provider='elysium',
+        endpoint='https://elysiumai.net/v1/videos',model='bytedance/seedance-2.5',
+        contract='i2v',roles=['First Frame'],
+        system='Animate the supplied first frame without changing the subject or composition. Describe temporal actions, camera motion, lighting and continuity. A First Frame image is mandatory.',
+        user_instructions='',
+        schema={'duration':{'type':'integer','minimum':1,'maximum':30,'default':3},
+                'resolution':{'type':'string','enum':['480p','720p','1080p'],'default':'720p'},
+                'aspect_ratio':{'type':'string','enum':['16:9','9:16','1:1','4:3','3:4'],'default':'16:9'}},
+        request_template={'model':'$model','operation':'image-to-video','prompt':'$prompt',
+                          'image':'$role.First Frame','input':{'$merge':'$parameters'}},
+        poll_url='https://elysiumai.net/v1/videos/{id}',version=1,
+        verified_at='',status='unverified',
+        source='https://elysiumai.net/docs/api/video'))
     return profiles
 BUILTINS={p['id']:p for p in seeds()}
 def init():
@@ -299,6 +317,7 @@ def save_profile(p):
     for field in ['name','mode','provider','endpoint','model','system']: require(isinstance(p.get(field),str) and p[field].strip(),'Заполните поле '+field)
     check_url(p['endpoint']); require(isinstance(p.get('schema'),dict),'Нужна JSON-схема параметров')
     if p['provider']=='higgsfield':require(urlparse(p['endpoint']).hostname=='api.higgsfield.ai','Ключ Higgsfield можно использовать только на api.higgsfield.ai')
+    if p['provider']=='elysium':require(urlparse(p['endpoint']).hostname=='elysiumai.net','Ключ ElysiumAI можно использовать только на elysiumai.net')
     require(isinstance(p.get('request_template'),dict),'Нужен JSON-шаблон запроса')
     require(isinstance(p.get('roles'),list) and all(isinstance(x,str) for x in p['roles']),'Роли должны быть списком строк')
     for name,schema in p['schema'].items():
@@ -307,6 +326,9 @@ def save_profile(p):
     # Built-in API constraints remain pinned; editable instructions cannot broaden them.
     if p['id'] in BUILTINS:
         original=BUILTINS[p['id']]
+        if p['id']=='elysium-seedance-i2v':
+            try:original={**original,'schema':get('profiles',p['id'])['schema']}
+            except ValueError:pass
         for key in ['endpoint','model','provider','contract','schema','request_template','poll_url','roles']: p[key]=copy.deepcopy(original[key])
     else:
         p['contract']='custom'
@@ -355,7 +377,7 @@ def validate_refs(p, refs, strict):
             if c=='swap':require(all(r.get('width',0)*r.get('height',0)>=409600 for r in groups['video']),'Object Swap требует не менее 409600 пикселей в кадре')
     if strict:
         for r in refs:
-            if r['type']=='image' and c in ['i2v','r2v']:
+            if r['type']=='image' and c in ['i2v','r2v'] and p['provider']!='elysium':
                 require(r.get('width') and r.get('height'),'Укажите размеры изображения '+r['name'])
                 require(300<r['width']<6000 and 300<r['height']<6000 and .4<r['width']/r['height']<2.5,'Изображение '+r['name']+': размеры 300–6000 px и пропорции 0.4–2.5 (границы не включены)')
                 require(r.get('size',0)<30*1024*1024,'Изображение превышает 30 MB')
@@ -397,6 +419,111 @@ def resolve_template(value, env):
             result.update(merge)
         return result
     return value
+def elysium_operation_spec():
+    """Check model and operation against the provider's free public catalog.
+
+    Never guess a paid input field when the catalog cannot be interpreted.
+    """
+    response=api_request('https://elysiumai.net/v1/media/models','',timeout=30)
+    models=response.get('data',response) if isinstance(response,dict) else response
+    if isinstance(models,dict):models=models.get('models',[])
+    require(isinstance(models,list),'ElysiumAI вернул неизвестный формат каталога моделей')
+    model=next((m for m in models if isinstance(m,dict) and m.get('id')=='bytedance/seedance-2.5'),None)
+    require(model is not None,'В каталоге ElysiumAI сейчас нет bytedance/seedance-2.5. Генерация не запущена.')
+    ops=model.get('operations',{})
+    operation=None
+    if isinstance(ops,dict):operation=ops.get('image-to-video')
+    elif isinstance(ops,list):
+        operation=next((o for o in ops if o=='image-to-video' or isinstance(o,dict) and
+                        (o.get('id')=='image-to-video' or o.get('name')=='image-to-video' or o.get('operation')=='image-to-video')),None)
+    require(operation is not None,'ElysiumAI не подтверждает image-to-video для Seedance 2.5. Платный запрос не отправлен.')
+    if not isinstance(operation,dict):operation={}
+    schema=(operation.get('input_schema') or operation.get('schema') or operation.get('parameters') or
+            (model.get('input_schema') if isinstance(model.get('input_schema'),dict) else None) or {})
+    if isinstance(schema,dict) and schema.get('type')=='object':properties=schema.get('properties',{})
+    elif isinstance(schema,dict):properties=schema.get('properties',schema)
+    else:properties={}
+    require(isinstance(properties,dict) and bool(properties),
+            'Каталог ElysiumAI не сообщил поля image-to-video. Не отправляйте платную генерацию до проверки схемы.')
+    # Different catalog versions expose nested input.properties and input_schema.
+    if 'input' in properties and isinstance(properties['input'],dict):
+        nested=properties['input'].get('properties')
+        if isinstance(nested,dict) and nested:
+            schema=properties['input'];properties=nested
+    return properties, schema
+
+
+def sync_elysium_profile():
+    properties,_=elysium_operation_spec()
+    # Only primitive model parameters can be edited with the existing inspector.
+    # Reference URLs are managed by the First Frame picker, not parameter fields.
+    image_keys={'first_frame','first_frame_url','image_url','image','start_image_url','start_image'}
+    require(bool(image_keys.intersection(properties)),
+            'Каталог ElysiumAI не указал поле First Frame. Профиль оставлен без изменений.')
+    schema={}
+    for key,rule in properties.items():
+        if key in image_keys or not isinstance(rule,dict):continue
+        typ=rule.get('type')
+        if isinstance(typ,list):typ=next((t for t in typ if t!='null'),None)
+        if typ not in {'boolean','integer','number','string'}:continue
+        if key not in {'duration','resolution','aspect_ratio','generate_audio','ratio','seed','fps'}:continue
+        item={'type':typ}
+        for name in ['enum','minimum','maximum']:
+            if name in rule:item[name]=rule[name]
+        default=rule.get('default')
+        if default is None and 'enum' in rule and rule['enum']:default=rule['enum'][0]
+        if default is None and typ in {'integer','number'}:default=rule.get('minimum',1)
+        if default is None and typ=='boolean':default=False
+        if default is None:continue
+        item['default']=default
+        schema[key]=item
+    require(bool(schema),'Каталог ElysiumAI не предоставил поддерживаемые параметры для редактора.')
+    profile=get('profiles','elysium-seedance-i2v')
+    profile['schema']=schema
+    profile['status']='verified'
+    profile['verified_at']=datetime.now(timezone.utc).date().isoformat()
+    profile['version']=profile.get('version',1)+1
+    put('profiles',profile)
+    return profile
+
+
+def prepare_elysium(payload):
+    properties,schema=elysium_operation_spec()
+    img=payload.pop('image',None)
+    require(isinstance(img,str) and img.startswith('https://'),
+            'Для ElysiumAI нужен First Frame с публичной HTTPS-ссылкой или загруженный в онлайн-студию файл.')
+    params=payload['input']
+    # Model-specific input schema is authoritative. Reject unknown or unsupported settings
+    # rather than silently dropping them (which could cause an expensive wrong video).
+    unsupported=set(params)-set(properties)
+    require(not unsupported,'ElysiumAI: в текущей схеме модели отсутствуют параметры '+', '.join(sorted(unsupported))+'. Генерация не запущена.')
+    for name,value in params.items():
+        rule=properties.get(name,{})
+        if isinstance(rule,dict):
+            typ=rule.get('type')
+            if isinstance(typ,list):typ=next((t for t in typ if t!='null'),None)
+            valid={'string':isinstance(value,str),'integer':type(value)==int,
+                   'number':type(value) in (int,float),'boolean':type(value)==bool}
+            if typ in valid:require(valid[typ],'ElysiumAI: неверный тип параметра '+name)
+            if 'enum' in rule:require(value in rule['enum'],'ElysiumAI: неподдерживаемое значение '+name)
+            if 'minimum' in rule:require(value>=rule['minimum'],'ElysiumAI: '+name+' ниже минимума')
+            if 'maximum' in rule:require(value<=rule['maximum'],'ElysiumAI: '+name+' выше максимума')
+    # The provider documents the generic `image` field as well as model-specific
+    # input keys. Prefer an explicit field from the operation's published schema.
+    for image_key in ('first_frame','first_frame_url','image_url','image','start_image_url','start_image'):
+        if image_key in properties:
+            params[image_key]=img
+            break
+    else:
+        require(False,'ElysiumAI не указал поле первого кадра в схеме image-to-video. Генерация не запущена.')
+    required=schema.get('required',[]) if isinstance(schema,dict) else []
+    if isinstance(required,list):
+        missing=set(required)-set(params)
+        require(not missing,'ElysiumAI: текущая схема требует дополнительные поля '+', '.join(sorted(missing))+'. Генерация не запущена.')
+    payload['input']=params
+    return payload
+
+
 def prepare(body):
     p=get('profiles',body['profile_id']); prompt=body.get('prompt','').strip()
     require(prompt or p.get('contract') in ['motion','swap'],'Промпт пуст'); require(len(prompt)<=(5000 if p.get('contract') in ['motion','swap'] else 15000),'Слишком длинный промпт')
@@ -408,7 +535,10 @@ def prepare(body):
             value=reference_value(r,p); env[plural].append(value); env['role'][r['role']]=value; mapping[r['id']]='@'+typ.title()+str(index)
     prompt,mapping=render_references(prompt,refs,p)
     env['prompt']=prompt
-    return p,resolve_template(p['request_template'],env),refs,mapping
+    payload=resolve_template(p['request_template'],env)
+    if p['id']=='elysium-seedance-i2v':
+        payload=prepare_elysium(payload)
+    return p,payload,refs,mapping
 
 def director(body):
     p=get('profiles',body['profile_id']); brief=body.get('brief','').strip(); require(brief,'Опишите ваш замысел')
@@ -541,6 +671,7 @@ class Handler(BaseHTTPRequestHandler):
             size=int(self.headers.get('Content-Length',0)); require(0<size<290*1024*1024,'Неверный размер запроса'); b=json.loads(self.rfile.read(size))
             if path=='/api/relay':return self.send(relay_request(b))
             if path=='/api/test-connection':return self.send(test_connection(b.get('provider','')))
+            if path=='/api/sync-elysium-profile':return self.send(sync_elysium_profile())
             if path=='/api/example':return self.send(knowledge.save_example(b))
             if path=='/api/anatomy':return self.send(knowledge.anatomy(b))
             if path=='/api/workspace':
@@ -611,7 +742,7 @@ class Handler(BaseHTTPRequestHandler):
                     job=put('jobs',dict(id=uid(),title=t['title'],profile_id=t['profile_id'],provider=t['provider'],poll_url=t['poll_url'],status='submitting',created_at=now(),ticket=t['id']))
                 try:
                     auth_key,auth_headers=provider_auth(t['provider']);auth_headers['Idempotency-Key']=job['id']
-                    response=api_request(t['endpoint'],auth_key,t['payload'],auth_headers); d=response.get('data',response); job.update(remote_id=d.get('id') or d.get('request_id',''),status=d.get('status','submitted'),response=response)
+                    response=api_request(t['endpoint'],auth_key,t['payload'],auth_headers); d=response.get('data',response); job.update(remote_id=d.get('id') or d.get('task_id') or d.get('request_id',''),status=d.get('status','submitted'),response=response)
                     if t['provider']=='higgsfield' and d.get('status_url'):
                         require(urlparse(d['status_url']).hostname=='api.higgsfield.ai','API вернул чужой адрес проверки');job['poll_url']=d['status_url']
                     code=response.get('code'); require(code in [None,0,200],'Провайдер отклонил запрос; проверьте историю в его кабинете.')
@@ -622,9 +753,22 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/poll':
                 job=get('jobs',b['id']); require(bool(job.get('remote_id')),'Нет ID удалённого задания'); require(time.time()-job.get('last_poll',0)>=15,'Повторная проверка доступна через 15 секунд')
                 endpoint=job['poll_url'].replace('{id}',job['remote_id']); job['last_poll']=time.time(); put('jobs',job)
-                auth_key,auth_headers=provider_auth(job['provider']);response=api_request(endpoint,auth_key,extra=auth_headers); d=response.get('data',response); outputs=d.get('outputs',[])
+                auth_key,auth_headers=provider_auth(job['provider']);response=api_request(endpoint,auth_key,extra=auth_headers); d=response.get('data',response)
+                require(isinstance(d,dict),'API вернул некорректный статус задания')
+                outputs=d.get('outputs',[])
                 if isinstance(d.get('video'),dict) and d['video'].get('url'):outputs=[d['video']['url']]
-                job.update(status=d.get('status','unknown'),response=response,outputs=outputs); return self.send(put('jobs',job))
+                if job['provider']=='elysium':
+                    metadata=d.get('metadata') if isinstance(d.get('metadata'),dict) else {}
+                    result_url=metadata.get('url') or d.get('result_url')
+                    if result_url:outputs=[result_url]
+                    if not outputs and isinstance(d.get('videos'),list):
+                        outputs=[v.get('url') for v in d['videos'] if isinstance(v,dict) and v.get('url')]
+                # Only https:// links can be displayed in the history UI.
+                outputs=[v for v in outputs if isinstance(v,str) and v.startswith('https://')] if isinstance(outputs,list) else []
+                job.update(status=d.get('status','unknown'),response=response,outputs=outputs)
+                if job['status'] in ('failed','error','cancelled','canceled'):
+                    job['error']=provider_message(d.get('error') or d.get('message') or 'Видеогенерация не завершилась')
+                return self.send(put('jobs',job))
             fail('Неизвестная операция')
         except ProviderError as e:self.send({'error':str(e),'http_status':e.http_status,'code':e.code,'request_id':e.request_id},400)
         except (ValueError,KeyError,TypeError) as e: self.send({'error':str(e) if isinstance(e,ValueError) else 'Некорректные данные запроса'},400)

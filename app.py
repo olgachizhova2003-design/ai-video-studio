@@ -246,7 +246,7 @@ def create_app(config=None,store=None):
     ready_users=set()
     def user_defaults():
         if who.get()['id'] in ready_users:return
-        for kind,item in [('settings',{'id':'main','prompt':{'url':'https://elysiumai.net/v1','model':'','vision':False,'video':False,'temperature':.6},'video':{'higgsfield':{'name':'Higgsfield API'},'atlas':{'name':'Atlas Cloud'},'nano':{'name':'NanoAPI'}}}),('workspace',{'id':'main','profile_id':'hf-seedance-i2v','brief':'','reference_ids':[],'parameters':{},'result':None,'messages':[]})]:
+        for kind,item in [('settings',{'id':'main','prompt':{'url':'https://elysiumai.net/v1','model':'','vision':False,'video':False,'temperature':.6},'video':{'higgsfield':{'name':'Higgsfield API'},'atlas':{'name':'Atlas Cloud'},'nano':{'name':'NanoAPI'},'elysium':{'name':'ElysiumAI'}}}),('workspace',{'id':'main','profile_id':'hf-seedance-i2v','brief':'','reference_ids':[],'parameters':{},'result':None,'messages':[]})]:
             try:get(kind,'main')
             except ValueError:put(kind,item)
         ready_users.add(who.get()['id'])
