@@ -407,6 +407,9 @@ def director(body):
     previous=body.get('previous_result');conversation=body.get('messages',[])[-12:]
     if previous and previous.get('profile_id') not in [None,p['id']]:previous=None;conversation=[]
     data={'brief':brief,'preferences':p.get('user_instructions',''),'current_parameters':params,'references':[{k:r.get(k) for k in ['id','type','name','role','description','duration']} for r in refs],'knowledge_excerpts':docs,'previous_result':previous,'conversation':conversation,'operation':body.get('operation','create'),'instruction':str(body.get('instruction',''))[:2000],'example_id':body.get('example_id'),'before_prompt':body.get('before_prompt')}
+    if body.get('story_context'):
+        data['series_context']=body['story_context']
+        system+='\nUse series_context as continuity reference for this shot only. Preserve supplied character identities, anatomical sides, relationships and scene intent. Open questions are not approved canon. Do not invent assets or claim unseen files were viewed.'
     content=[{'type':'text','text':json.dumps(data,ensure_ascii=False)}]
     if settings.get('vision'):
         count=0
@@ -428,6 +431,7 @@ def director(body):
         result=json.loads(re.sub(r'^```(?:json)?\s*|\s*```$','',raw.strip()))
     except (KeyError,IndexError,TypeError,json.JSONDecodeError): fail('Prompt AI вернул неверный JSON. Повторите запрос или выберите другую модель.')
     require(isinstance(result,dict) and isinstance(result.get('prompt'),str) and (bool(result['prompt'].strip()) or p.get('contract') in ['motion','swap']),'AI не вернул промпт')
+    if body.get('story_source'):result['story_source']=body['story_source']
     result['before']=body.get('before_prompt') or brief
     result['context_info']={'mode':mode_of(p),'provider':p['provider'],'examples':[d['document_id'] for d in docs if d.get('kind')=='example'],'characters':len(json.dumps(docs,ensure_ascii=False))}
     result['parameters']=validate_params(p['schema'],result.get('parameters',params))

@@ -20,3 +20,5 @@ jobs:
       - run: node --check static/online.js
       - run: node --check static/knowledge-ui.js
       - run: node test_knowledge_ui.cjs
+      - run: node --check static/story-ui.js
+      - run: node test_story_ui.cjs

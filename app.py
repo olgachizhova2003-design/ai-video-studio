@@ -10,6 +10,7 @@ from urllib.error import HTTPError,URLError
 from cryptography.fernet import Fernet,InvalidToken
 from flask import Flask,Response,abort,g,jsonify,redirect,request,send_from_directory,send_file,session
 from media_cache import MediaCache
+from story_engine import StoryEngine,StoryConflict
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 ROOT=Path(__file__).resolve().parent
@@ -187,6 +188,7 @@ def create_app(config=None,store=None):
             if section['document_id'] not in seen:first.append(section);seen.add(section['document_id'])
         return [{k:v for k,v in section.items() if k!='score'} for section in (first+[s for s in sections if s not in first])[:limit]]
     engine.save_document=save_document;engine.context=engine.knowledge.context
+    story=StoryEngine(engine)
     original_director=engine.director
     def hydrate(filename):
         if not MEDIA_NAME.fullmatch(filename):raise ValueError('Некорректное имя медиа')
@@ -197,6 +199,8 @@ def create_app(config=None,store=None):
             file.write_bytes(blob)
     cache_lock=threading.RLock();cache_readers={}
     def director(body):
+        body=copy.deepcopy(body);body.pop('story_context',None)
+        if body.get('story_source'):body['story_context']=story.prompt_context(body['story_source'])
         media=[]
         if get('settings','main')['prompt'].get('vision'):
             for r in engine.selected_refs(body.get('reference_ids',[])):
@@ -297,12 +301,14 @@ def create_app(config=None,store=None):
         response.headers['X-Content-Type-Options']='nosniff';response.headers['Referrer-Policy']='no-referrer';response.headers['X-Frame-Options']='DENY'
         response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
         return response
+    @app.errorhandler(StoryConflict)
+    def story_conflict(error):return jsonify(error=str(error)),409
     @app.errorhandler(CloudError)
     def cloud_error(error):return jsonify(error=str(error)),error.status if 400<=error.status<600 else 502
     @app.errorhandler(413)
     def payload_error(error):return jsonify(error='Файл слишком большой. Для онлайн-версии используйте медиа до 25 MB.'),413
     @app.get('/healthz')
-    def health():return jsonify(ok=True,app='ai-video-studio-online',version='2.0.0')
+    def health():return jsonify(ok=True,app='ai-video-studio-online',version='2.1.0')
     @app.get('/auth/csrf')
     def csrf():session.setdefault('csrf',secrets.token_urlsafe(32));return jsonify(csrf=session['csrf'])
     @app.get('/login')
@@ -346,6 +352,30 @@ def create_app(config=None,store=None):
     @app.route('/',defaults={'path':''},methods=['GET'])
     @app.route('/api/<path:path>',methods=['GET','POST'])
     def engine_route(path):
+        if path.startswith('story/'):
+            action=path[6:]
+            try:
+                if action=='state' and request.method=='GET':return jsonify(story.state())
+                if request.method!='POST':return jsonify(error='Неизвестная сценарная операция'),404
+                body=request.get_json(silent=True) or {}
+                if not isinstance(body,dict):raise ValueError('Нужен JSON объект')
+                if action=='project':result=story.save_project(body)
+                elif action=='episode':result=story.save_episode(body)
+                elif action=='import':result=story.import_project(body)
+                elif action=='export':result=story.export(body.get('project_id',''))
+                elif action=='revisions':
+                    if body.get('kind') not in ['projects','episodes']:raise ValueError('Неизвестный вид материала')
+                    result=story.revisions(body['kind'],body.get('id',''))
+                elif action=='restore':result=story.restore(body)
+                elif action=='analyze':result=story.analyze(body)
+                elif action=='apply':result=story.apply(body)
+                elif action=='handoff':result=story.handoff(body)
+                elif action=='plan':
+                    project,episode,scene,shot=story.shot_context(body);result=story.plan(project,scene,shot)
+                else:return jsonify(error='Неизвестная сценарная операция'),404
+                return jsonify(result)
+            except StoryConflict:raise
+            except ValueError as error:return jsonify(error=str(error)),400
         if request.path=='/':
             html=(ROOT/'static'/'index.html').read_text(encoding='utf-8')
             for name,version in asset_versions.items():
@@ -369,7 +399,7 @@ def create_app(config=None,store=None):
         if request.method=='POST':handler.do_POST()
         else:handler.do_GET()
         return handler.result if handler.result is not None else (jsonify(error='Неизвестная операция'),400)
-    app.extensions['studio_engine']=engine;app.extensions['studio_store']=store;app.extensions['studio_cipher']=cipher
+    app.extensions['studio_story']=story;app.extensions['studio_engine']=engine;app.extensions['studio_store']=store;app.extensions['studio_cipher']=cipher
     return app
 
 if __name__=='__main__':
