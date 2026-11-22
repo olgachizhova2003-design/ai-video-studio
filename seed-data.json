@@ -525,17 +525,18 @@
       "endpoint": "https://elysiumai.net/v1/videos",
       "model": "bytedance/seedance-2.5",
       "contract": "i2v",
-      "system": "Animate the supplied first frame without changing the subject or composition. Describe temporal actions, camera motion, lighting and continuity. A First Frame image is mandatory.",
-      "user_instructions": "",
       "roles": [
-        "First Frame"
+        "First Frame",
+        "Last Frame"
       ],
+      "system": "Animate the supplied completed first frame; preserve subjects and setting. Describe camera motion, temporal progression and continuity.",
+      "user_instructions": "",
       "schema": {
         "duration": {
           "type": "integer",
           "minimum": 1,
           "maximum": 30,
-          "default": 3
+          "default": 5
         },
         "resolution": {
           "type": "string",
@@ -549,26 +550,118 @@
         "aspect_ratio": {
           "type": "string",
           "enum": [
-            "16:9",
-            "9:16",
             "1:1",
             "4:3",
-            "3:4"
+            "3:4",
+            "16:9",
+            "9:16",
+            "21:9",
+            "adaptive"
           ],
-          "default": "16:9"
+          "default": "adaptive"
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "default": true
+        },
+        "output_format": {
+          "type": "string",
+          "enum": [
+            "mp4",
+            "mov"
+          ],
+          "default": "mp4"
         }
       },
       "request_template": {
         "model": "$model",
-        "operation": "image-to-video",
+        "operation": "generate",
         "prompt": "$prompt",
-        "image": "$role.First Frame",
         "input": {
-          "$merge": "$parameters"
+          "$merge": "$parameters",
+          "first_frame_url": "$role.First Frame",
+          "last_frame_url": "$role.Last Frame"
         }
       },
       "poll_url": "https://elysiumai.net/v1/videos/{id}",
-      "version": 1,
+      "version": 2,
+      "verified_at": "",
+      "status": "unverified",
+      "source": "https://elysiumai.net/docs/api/video"
+    },
+    {
+      "id": "elysium-seedance-r2v",
+      "name": "Seedance 2.5 · ElysiumAI",
+      "mode": "Reference to Video",
+      "provider": "elysium",
+      "endpoint": "https://elysiumai.net/v1/videos",
+      "model": "bytedance/seedance-2.5",
+      "contract": "r2v",
+      "roles": [
+        "Main Character",
+        "Environment",
+        "Outfit Reference",
+        "Style Reference",
+        "Motion Reference",
+        "Audio Reference"
+      ],
+      "system": "Generate a new video using the supplied reference images, audio, and videos; respect identity, outfit, setting and individual reference roles. Describe action and movement without inventing files or claiming unprovided assets.",
+      "user_instructions": "",
+      "schema": {
+        "duration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 5
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "1:1",
+            "4:3",
+            "3:4",
+            "16:9",
+            "9:16",
+            "21:9",
+            "adaptive"
+          ],
+          "default": "adaptive"
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "default": true
+        },
+        "output_format": {
+          "type": "string",
+          "enum": [
+            "mp4",
+            "mov"
+          ],
+          "default": "mp4"
+        }
+      },
+      "request_template": {
+        "model": "$model",
+        "operation": "generate",
+        "prompt": "$prompt",
+        "input": {
+          "$merge": "$parameters",
+          "reference_image_urls": "$images",
+          "reference_video_urls": "$videos",
+          "reference_audio_urls": "$audios"
+        }
+      },
+      "poll_url": "https://elysiumai.net/v1/videos/{id}",
+      "version": 2,
       "verified_at": "",
       "status": "unverified",
       "source": "https://elysiumai.net/docs/api/video"

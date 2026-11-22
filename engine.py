@@ -82,24 +82,36 @@ def seeds():
         else:
             p['endpoint']=HF_BASE+'/'+p['model'];p['schema']['aspect_ratio']={'type':'string','enum':['16:9','4:3','1:1','3:4','9:16','21:9'],'default':'16:9'}
         profiles.append(p)
-    # Elysium's video API is a different contract from Atlas/Higgsfield.
-    # Parameters and the first-frame field are checked against its live catalog
-    # before a paid task can be submitted.
-    profiles.append(dict(
-        id='elysium-seedance-i2v',name='Seedance 2.5 · ElysiumAI',
-        mode='Image to Video',provider='elysium',
-        endpoint='https://elysiumai.net/v1/videos',model='bytedance/seedance-2.5',
-        contract='i2v',roles=['First Frame'],
-        system='Animate the supplied first frame without changing the subject or composition. Describe temporal actions, camera motion, lighting and continuity. A First Frame image is mandatory.',
-        user_instructions='',
-        schema={'duration':{'type':'integer','minimum':1,'maximum':30,'default':3},
-                'resolution':{'type':'string','enum':['480p','720p','1080p'],'default':'720p'},
-                'aspect_ratio':{'type':'string','enum':['16:9','9:16','1:1','4:3','3:4'],'default':'16:9'}},
-        request_template={'model':'$model','operation':'image-to-video','prompt':'$prompt',
-                          'image':'$role.First Frame','input':{'$merge':'$parameters'}},
-        poll_url='https://elysiumai.net/v1/videos/{id}',version=1,
-        verified_at='',status='unverified',
-        source='https://elysiumai.net/docs/api/video'))
+    # ElysiumAI Seedance 2.5: operation is `generate`, for both I2V and R2V.
+    # GET /v1/media/models describes first_frame_url and reference_*_urls
+    # in the generate operation's input.properties; not a distinct operation.
+    elysium_schema={
+        'duration':{'type':'integer','minimum':1,'maximum':30,'default':5},
+        'resolution':{'type':'string','enum':['480p','720p','1080p'],'default':'720p'},
+        'aspect_ratio':{'type':'string','enum':['1:1','4:3','3:4','16:9','9:16','21:9','adaptive'],'default':'adaptive'},
+        'generate_audio':{'type':'boolean','default':True},
+        'output_format':{'type':'string','enum':['mp4','mov'],'default':'mp4'},
+    }
+    for contract in ('i2v','r2v'):
+        i2v=contract=='i2v'
+        request={'model':'$model','operation':'generate','prompt':'$prompt','input':{'$merge':'$parameters'}}
+        if i2v:request['input'].update(first_frame_url='$role.First Frame',last_frame_url='$role.Last Frame')
+        else:request['input'].update(reference_image_urls='$images',reference_video_urls='$videos',reference_audio_urls='$audios')
+        profiles.append(dict(
+            id='elysium-seedance-'+contract,
+            name='Seedance 2.5 · ElysiumAI',
+            mode='Image to Video' if i2v else 'Reference to Video',provider='elysium',
+            endpoint='https://elysiumai.net/v1/videos',model='bytedance/seedance-2.5',
+            contract=contract,
+            roles=['First Frame','Last Frame'] if i2v else ['Main Character','Environment','Outfit Reference','Style Reference','Motion Reference','Audio Reference'],
+            system=('Animate the supplied completed first frame; preserve subjects and setting. '
+                    'Describe camera motion, temporal progression and continuity.' if i2v else
+                    'Generate a new video using the supplied reference images, audio, and videos; '
+                    'respect identity, outfit, setting and individual reference roles. '
+                    'Describe action and movement without inventing files or claiming unprovided assets.'),
+            user_instructions='',schema=copy.deepcopy(elysium_schema),
+            request_template=request,poll_url='https://elysiumai.net/v1/videos/{id}',
+            version=2,verified_at='',status='unverified',source='https://elysiumai.net/docs/api/video'))
     return profiles
 BUILTINS={p['id']:p for p in seeds()}
 def init():
@@ -326,7 +338,7 @@ def save_profile(p):
     # Built-in API constraints remain pinned; editable instructions cannot broaden them.
     if p['id'] in BUILTINS:
         original=BUILTINS[p['id']]
-        if p['id']=='elysium-seedance-i2v':
+        if p['id'] in ('elysium-seedance-i2v','elysium-seedance-r2v'):
             try:original={**original,'schema':get('profiles',p['id'])['schema']}
             except ValueError:pass
         for key in ['endpoint','model','provider','contract','schema','request_template','poll_url','roles']: p[key]=copy.deepcopy(original[key])
@@ -420,108 +432,101 @@ def resolve_template(value, env):
         return result
     return value
 def elysium_operation_spec():
-    """Check model and operation against the provider's free public catalog.
+    """Get the actual `generate` operation and input schema (free catalog request).
 
-    Never guess a paid input field when the catalog cannot be interpreted.
+    Reject unknown layouts before spending money; never infer model fields.
     """
     response=api_request('https://elysiumai.net/v1/media/models','',timeout=30)
     models=response.get('data',response) if isinstance(response,dict) else response
     if isinstance(models,dict):models=models.get('models',[])
     require(isinstance(models,list),'ElysiumAI вернул неизвестный формат каталога моделей')
     model=next((m for m in models if isinstance(m,dict) and m.get('id')=='bytedance/seedance-2.5'),None)
-    require(model is not None,'В каталоге ElysiumAI сейчас нет bytedance/seedance-2.5. Генерация не запущена.')
-    ops=model.get('operations',{})
-    operation=None
-    if isinstance(ops,dict):operation=ops.get('image-to-video')
-    elif isinstance(ops,list):
-        operation=next((o for o in ops if o=='image-to-video' or isinstance(o,dict) and
-                        (o.get('id')=='image-to-video' or o.get('name')=='image-to-video' or o.get('operation')=='image-to-video')),None)
-    require(operation is not None,'ElysiumAI не подтверждает image-to-video для Seedance 2.5. Платный запрос не отправлен.')
-    if not isinstance(operation,dict):operation={}
-    schema=(operation.get('input_schema') or operation.get('schema') or operation.get('parameters') or
-            (model.get('input_schema') if isinstance(model.get('input_schema'),dict) else None) or {})
-    if isinstance(schema,dict) and schema.get('type')=='object':properties=schema.get('properties',{})
-    elif isinstance(schema,dict):properties=schema.get('properties',schema)
-    else:properties={}
-    require(isinstance(properties,dict) and bool(properties),
-            'Каталог ElysiumAI не сообщил поля image-to-video. Не отправляйте платную генерацию до проверки схемы.')
-    # Different catalog versions expose nested input.properties and input_schema.
-    if 'input' in properties and isinstance(properties['input'],dict):
-        nested=properties['input'].get('properties')
-        if isinstance(nested,dict) and nested:
-            schema=properties['input'];properties=nested
-    return properties, schema
+    require(model is not None,'В каталоге ElysiumAI сейчас нет Seedance 2.5. Генерация не запущена.')
+    operations=model.get('operations',[])
+    if isinstance(operations,dict):operation=operations.get('generate')
+    elif isinstance(operations,list):
+        operation=next((o for o in operations if isinstance(o,dict) and o.get('name')=='generate'),None)
+    else:operation=None
+    require(isinstance(operation,dict),'В каталоге ElysiumAI нет операции generate для Seedance 2.5.')
+    schema=operation.get('input') or operation.get('input_schema') or operation.get('schema')
+    require(isinstance(schema,dict) and isinstance(schema.get('properties'),dict) and schema['properties'],
+            'ElysiumAI не вернул схему input для Seedance 2.5. Платный запрос не отправлен.')
+    return schema['properties'],schema
 
 
 def sync_elysium_profile():
     properties,_=elysium_operation_spec()
-    # Only primitive model parameters can be edited with the existing inspector.
-    # Reference URLs are managed by the First Frame picker, not parameter fields.
-    image_keys={'first_frame','first_frame_url','image_url','image','start_image_url','start_image'}
-    require(bool(image_keys.intersection(properties)),
-            'Каталог ElysiumAI не указал поле First Frame. Профиль оставлен без изменений.')
-    schema={}
-    for key,rule in properties.items():
-        if key in image_keys or not isinstance(rule,dict):continue
-        typ=rule.get('type')
-        if isinstance(typ,list):typ=next((t for t in typ if t!='null'),None)
-        if typ not in {'boolean','integer','number','string'}:continue
-        if key not in {'duration','resolution','aspect_ratio','generate_audio','ratio','seed','fps'}:continue
-        item={'type':typ}
-        for name in ['enum','minimum','maximum']:
-            if name in rule:item[name]=rule[name]
-        default=rule.get('default')
-        if default is None and 'enum' in rule and rule['enum']:default=rule['enum'][0]
-        if default is None and typ in {'integer','number'}:default=rule.get('minimum',1)
-        if default is None and typ=='boolean':default=False
-        if default is None:continue
-        item['default']=default
-        schema[key]=item
-    require(bool(schema),'Каталог ElysiumAI не предоставил поддерживаемые параметры для редактора.')
-    profile=get('profiles','elysium-seedance-i2v')
-    profile['schema']=schema
-    profile['status']='verified'
-    profile['verified_at']=datetime.now(timezone.utc).date().isoformat()
-    profile['version']=profile.get('version',1)+1
-    put('profiles',profile)
-    return profile
+    require('first_frame_url' in properties and 'reference_image_urls' in properties,
+            'В каталоге ElysiumAI нет нужных полей first_frame_url / reference_image_urls.')
+    results=[]
+    for profile_id in ('elysium-seedance-i2v','elysium-seedance-r2v'):
+        profile=get('profiles',profile_id)
+        schema={}
+        for key in ('duration','resolution','aspect_ratio','generate_audio','output_format'):
+            rule=properties.get(key)
+            if not isinstance(rule,dict) or rule.get('type') not in ('integer','number','string','boolean'):continue
+            typ=rule['type'];default=rule.get('default')
+            if default is None:continue
+            entry={'type':typ,'default':default}
+            for name in ('enum','minimum','maximum'):
+                if rule.get(name) is not None:entry[name]=rule[name]
+            # Optional local guard against unintentionally huge video requests.
+            if key=='duration' and 'maximum' not in entry:entry['maximum']=30
+            if key=='duration' and 'minimum' not in entry:entry['minimum']=1
+            schema[key]=entry
+        require(bool(schema),'Каталог ElysiumAI не предоставил поддерживаемые параметры для редактора.')
+        profile['schema']=schema
+        profile['status']='verified' # Catalog schema validated, not a paid generation test.
+        profile['verified_at']=datetime.now(timezone.utc).date().isoformat()
+        profile['version']=max(profile.get('version',1),2)
+        put('profiles',profile);results.append(profile)
+    return results[0]
 
 
-def prepare_elysium(payload):
+def prepare_elysium(payload,contract='i2v'):
+    """Validate references and produce ElysiumAI's generate request without POST."""
     properties,schema=elysium_operation_spec()
-    img=payload.pop('image',None)
-    require(isinstance(img,str) and img.startswith('https://'),
-            'Для ElysiumAI нужен First Frame с публичной HTTPS-ссылкой или загруженный в онлайн-студию файл.')
-    params=payload['input']
-    # Model-specific input schema is authoritative. Reject unknown or unsupported settings
-    # rather than silently dropping them (which could cause an expensive wrong video).
+    require(contract in ('i2v','r2v'),'Неподдерживаемый режим ElysiumAI')
+    require(payload.get('model')=='bytedance/seedance-2.5','Неверная модель ElysiumAI')
+    params=payload.get('input')
+    require(isinstance(params,dict),'ElysiumAI: параметры input должны быть объектом')
+    require(isinstance(payload.get('prompt'),str) and payload['prompt'].strip(),'Промпт пуст')
+    require(len(payload['prompt'])<=properties.get('prompt',{}).get('maxLength',30000),
+            'Промпт ElysiumAI слишком длинный')
     unsupported=set(params)-set(properties)
-    require(not unsupported,'ElysiumAI: в текущей схеме модели отсутствуют параметры '+', '.join(sorted(unsupported))+'. Генерация не запущена.')
-    for name,value in params.items():
-        rule=properties.get(name,{})
-        if isinstance(rule,dict):
-            typ=rule.get('type')
-            if isinstance(typ,list):typ=next((t for t in typ if t!='null'),None)
-            valid={'string':isinstance(value,str),'integer':type(value)==int,
-                   'number':type(value) in (int,float),'boolean':type(value)==bool}
-            if typ in valid:require(valid[typ],'ElysiumAI: неверный тип параметра '+name)
-            if 'enum' in rule:require(value in rule['enum'],'ElysiumAI: неподдерживаемое значение '+name)
-            if 'minimum' in rule:require(value>=rule['minimum'],'ElysiumAI: '+name+' ниже минимума')
-            if 'maximum' in rule:require(value<=rule['maximum'],'ElysiumAI: '+name+' выше максимума')
-    # The provider documents the generic `image` field as well as model-specific
-    # input keys. Prefer an explicit field from the operation's published schema.
-    for image_key in ('first_frame','first_frame_url','image_url','image','start_image_url','start_image'):
-        if image_key in properties:
-            params[image_key]=img
-            break
+    require(not unsupported,'ElysiumAI: неподдерживаемые параметры '+', '.join(sorted(unsupported)))
+    ref_keys=('first_frame_url','last_frame_url','reference_image_urls','reference_video_urls','reference_audio_urls')
+    if contract=='i2v':
+        require(params.get('first_frame_url'),'Для ElysiumAI Image to Video нужен First Frame')
+        require(not any(params.get(k) for k in ref_keys[2:]),'I2V не принимает дополнительные референсы')
     else:
-        require(False,'ElysiumAI не указал поле первого кадра в схеме image-to-video. Генерация не запущена.')
-    required=schema.get('required',[]) if isinstance(schema,dict) else []
-    if isinstance(required,list):
-        missing=set(required)-set(params)
-        require(not missing,'ElysiumAI: текущая схема требует дополнительные поля '+', '.join(sorted(missing))+'. Генерация не запущена.')
-    payload['input']=params
-    return payload
+        require(any(params.get(k) for k in ref_keys[2:]),
+                'Для ElysiumAI Reference to Video добавьте хотя бы один референс')
+        require(not any(params.get(k) for k in ref_keys[:2]),
+                'В режиме Reference to Video передавайте референсы вместо первого кадра')
+    for key,value in params.items():
+        rule=properties[key]
+        if not isinstance(rule,dict):continue
+        typ=rule.get('type')
+        types={'string':lambda x:isinstance(x,str), 'integer':lambda x:type(x)==int,
+               'boolean':lambda x:type(x)==bool,'number':lambda x:type(x) in (int,float),
+               'array':lambda x:isinstance(x,list)}
+        if typ in types:require(types[typ](value),'ElysiumAI: неверный тип '+key)
+        if isinstance(value,str) and key in ref_keys:
+            require(value.startswith('https://'),'Для '+key+' нужна публичная HTTPS-ссылка')
+        if isinstance(value,list):
+            if rule.get('maxItems') is not None:require(len(value)<=rule['maxItems'],
+                                                      'ElysiumAI: слишком много файлов '+key)
+            require(all(isinstance(u,str) and u.startswith('https://') for u in value),
+                    'ElysiumAI: ссылки референсов должны быть публичными HTTPS URL')
+        if rule.get('enum') is not None:require(value in rule['enum'],'ElysiumAI: неверное значение '+key)
+        if rule.get('minimum') is not None:require(value>=rule['minimum'],'ElysiumAI: '+key+' ниже минимума')
+        if rule.get('maximum') is not None:require(value<=rule['maximum'],'ElysiumAI: '+key+' выше максимума')
+    require(not schema.get('required') or all(k in params or k=='prompt' for k in schema['required']),
+            'ElysiumAI: не заполнено обязательное поле модели')
+    # ElysiumAI's API uses a single `generate` operation, both with first_frame_url
+    # and with reference_image_urls. This is not the Atlas contract.
+    return {'model':payload['model'],'operation':'generate','prompt':payload['prompt'],'input':params}
 
 
 def prepare(body):
@@ -536,8 +541,8 @@ def prepare(body):
     prompt,mapping=render_references(prompt,refs,p)
     env['prompt']=prompt
     payload=resolve_template(p['request_template'],env)
-    if p['id']=='elysium-seedance-i2v':
-        payload=prepare_elysium(payload)
+    if p['provider']=='elysium' and p['id'] in ('elysium-seedance-i2v','elysium-seedance-r2v'):
+        payload=prepare_elysium(payload,p['contract'])
     return p,payload,refs,mapping
 
 def director(body):

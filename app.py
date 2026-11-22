@@ -237,7 +237,16 @@ def create_app(config=None,store=None):
             seed_data=json.loads((ROOT/'seed-data.json').read_text(encoding='utf-8'))
             existing={p['id'] for p in store.all('profiles')}
             for p in seed_data['profiles']:
-                if p['id'] not in existing:store.put('profiles',p)
+                if p['id'] not in existing:
+                    store.put('profiles',p)
+                elif p['id']=='elysium-seedance-i2v':
+                    # Upgrade only the previously shipped built-in Elysium contract.
+                    # Do not overwrite user-edited text or touch workspace/history/refs.
+                    old=store.get('profiles',p['id'])
+                    if old.get('provider')=='elysium' and old.get('contract')=='i2v' and old.get('version',1)<2:
+                        for field in ('endpoint','model','roles','schema','request_template','poll_url','version','status','verified_at'):
+                            old[field]=copy.deepcopy(p[field])
+                        store.put('profiles',old)
             existing={d['id'] for d in store.all('documents')}
             for d in seed_data['documents']:
                 if d['id'] not in existing:store.put('documents',d)
