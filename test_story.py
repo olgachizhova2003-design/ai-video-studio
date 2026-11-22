@@ -77,5 +77,30 @@ class StoryAcceptance(unittest.TestCase):
   self.assertEqual(self.req('/api/story/analyze',{'operation':'review','project_id':other['id'],'episode_id':self.ep['id']}).status_code,400)
   self.store.put('references',{'id':'video9','name':'Wrong type','type':'video','role':'Motion Reference'})
   self.assertEqual(self.req('/api/story/handoff',{'project_id':self.p['id'],'episode_id':self.ep['id'],'scene_id':'scene','shot_id':'shot','profile_id':'hf-seedance-i2v','bindings':[{'reference_id':'video9','role':'First Frame'}]}).status_code,400)
+ def test_asset_deletion_removes_only_selected_duplicate_and_is_recoverable(self):
+  reference={'id':'image7','name':'Portrait','type':'image','file':'test.png'};self.store.put('references',reference);self.store.files['test.png']=b'original'
+  asset={'id':'original','kind':'face','name':'Portrait','character_id':'hero','reference_id':'image7'}
+  project=self.req('/api/story/project',{**self.p,'assets':[asset,{**asset,'id':'duplicate'}]}).json
+  body={'project_id':project['id'],'version':project['version'],'asset_id':'duplicate'}
+  self.assertEqual(self.req('/api/story/delete-asset',body,csrf='wrong').status_code,403)
+  result=self.req('/api/story/delete-asset',body);self.assertEqual(result.status_code,200,result.json)
+  self.assertEqual([a['id'] for a in result.json['assets']],['original'])
+  self.assertEqual(result.json['characters'],project['characters']);self.assertEqual(result.json['canon'],project['canon'])
+  self.assertEqual(self.store.get('references','image7'),reference);self.assertEqual(self.store.files['test.png'],b'original')
+  self.assertEqual(self.store.get('story_episodes',self.ep['id']),self.ep)
+  self.assertEqual(self.req('/api/story/delete-asset',body).status_code,409)
+  revisions=self.req('/api/story/revisions',{'kind':'projects','id':project['id']}).json
+  revision=next(r for r in revisions if r['version']==project['version'])
+  restored=self.req('/api/story/restore',{'revision_id':revision['id'],'version':result.json['version']})
+  self.assertEqual(restored.status_code,200,restored.json);self.assertEqual(len(restored.json['assets']),2)
+ def test_asset_deletion_blocks_used_cards_without_partial_changes(self):
+  asset={'id':'outfit','name':'Costume','kind':'outfit','character_id':'hero'}
+  project=self.req('/api/story/project',{**self.p,'assets':[asset]}).json
+  episode=copy.deepcopy(self.ep);episode['scenes'][0]['shots'][0]['asset_needs'][0]['asset_id']='outfit'
+  self.assertEqual(self.req('/api/story/episode',episode).status_code,200)
+  before=copy.deepcopy(self.store.rows)
+  result=self.req('/api/story/delete-asset',{'project_id':project['id'],'version':project['version'],'asset_id':'outfit'})
+  self.assertEqual(result.status_code,400);self.assertIn('Reaction',result.json['error']);self.assertEqual(self.store.rows,before)
+  self.assertEqual(self.req('/api/story/delete-asset',{'project_id':project['id'],'version':project['version'],'asset_id':'missing'}).status_code,400)
 
 if __name__=='__main__':unittest.main()

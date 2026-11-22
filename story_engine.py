@@ -69,6 +69,22 @@ class StoryEngine:
         ids=[a['id'] for a in result]
         if len(ids)!=len(set(ids)):raise ValueError('Повторяется ID ассета')
         return result
+    def delete_asset(self,body):
+        with self.lock:
+            project=self.get('projects',body.get('project_id',''))
+            if body.get('version')!=project['version']:raise StoryConflict('Материалы уже изменены. Обновите раздел и повторно выберите ассет для удаления.')
+            asset_id=identifier(body.get('asset_id',''))
+            if not any(a['id']==asset_id for a in project['assets']):raise ValueError('Ассет уже удалён или не найден. Обновите раздел.')
+            for episode in self.all('episodes'):
+                if episode['project_id']!=project['id']:continue
+                for scene in episode['scenes']:
+                    for shot in scene['shots']:
+                        if any(n.get('asset_id')==asset_id for n in shot['asset_needs']):
+                            raise ValueError('Ассет используется: серия «'+episode['title']+'», сцена «'+scene['title']+'», кадр «'+shot['title']+'». Сначала выберите другой ассет или уберите привязку в редакторе кадра.')
+            project=copy.deepcopy(project)
+            project['assets']=[a for a in project['assets'] if a['id']!=asset_id]
+            # The prior project revision keeps the card recoverable; media are untouched.
+            return self.save_project(project)
     def shots(self,values,char_ids):
         if not isinstance(values,list) or len(values)>60:raise ValueError('Допускается до 60 кадров на сцену')
         result=[]

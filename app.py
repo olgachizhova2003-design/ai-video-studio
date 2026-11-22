@@ -360,6 +360,7 @@ def create_app(config=None,store=None):
                 body=request.get_json(silent=True) or {}
                 if not isinstance(body,dict):raise ValueError('Нужен JSON объект')
                 if action=='project':result=story.save_project(body)
+                elif action=='delete-asset':result=story.delete_asset(body)
                 elif action=='episode':result=story.save_episode(body)
                 elif action=='import':result=story.import_project(body)
                 elif action=='export':result=story.export(body.get('project_id',''))
