@@ -255,8 +255,18 @@ def test_connection(provider):
     if provider=='prompt':
         p=get('settings','main')['prompt'];require(p.get('url'),'Укажите Base URL Prompt AI');require(p.get('model'),'Выберите модель Prompt AI')
         endpoint=p['url'].rstrip('/');endpoint=endpoint if endpoint.endswith('/chat/completions') else endpoint+'/chat/completions'
-        data=api_request(endpoint,get_key('prompt'),{'model':p['model'],'messages':[{'role':'user','content':'Reply OK.'}],'max_tokens':4,'stream':False},timeout=45)
+        # Reasoning models spend the output budget on thinking as well as visible text.
+        # Keep a bounded probe, but leave room for thinking before the short reply.
+        try:
+            data=api_request(endpoint,get_key('prompt'),{'model':p['model'],'messages':[{'role':'user','content':'Reply with only OK.'}],'max_tokens':4096,'stream':False},timeout=90)
+        except ProviderError as error:
+            if error.code=='output_budget_exhausted':
+                raise ProviderError('Модель исчерпала лимит токенов на рассуждение и не успела ответить. Это лимит одного ответа, а не сообщение о балансе. Проверка не повторяется автоматически. Подробности API: '+str(error),error.http_status,error.code,error.request_id) from error
+            raise
         require(isinstance(data.get('choices'),list) and bool(data['choices']),'API ответил, но не вернул choices: '+provider_message(data))
+        choice=data['choices'][0];message=choice.get('message') or {};content=message.get('content')
+        text=content if isinstance(content,str) else ''.join(part.get('text','') for part in content if isinstance(part,dict) and isinstance(part.get('text'),str)) if isinstance(content,list) else ''
+        require(bool(text.strip()),'API доступен, но модель не вернула текст ответа'+(': исчерпан лимит токенов.' if choice.get('finish_reason')=='length' else '. Причина: '+str(choice.get('finish_reason') or 'не указана')+'.'))
         return {'ok':True,'message':'Подключено · модель '+p['model']+' ответила','provider':provider}
     key,headers=provider_auth(provider)
     if provider=='higgsfield':
