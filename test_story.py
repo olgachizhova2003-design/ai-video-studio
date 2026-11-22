@@ -102,5 +102,29 @@ class StoryAcceptance(unittest.TestCase):
   result=self.req('/api/story/delete-asset',{'project_id':project['id'],'version':project['version'],'asset_id':'outfit'})
   self.assertEqual(result.status_code,400);self.assertIn('Reaction',result.json['error']);self.assertEqual(self.store.rows,before)
   self.assertEqual(self.req('/api/story/delete-asset',{'project_id':project['id'],'version':project['version'],'asset_id':'missing'}).status_code,400)
+ def test_scene_proposals_survive_asset_only_edits_with_legacy_revision_fallback(self):
+  for legacy in [False,True]:
+   with self.subTest(legacy=legacy):
+    suggestion=self.analyze('outline')
+    if legacy:
+     suggestion.pop('project_context_hash');self.store.put('story_suggestions',suggestion)
+    project=self.store.get('story_projects',self.p['id'])
+    self.assertEqual(self.req('/api/story/project',{**project,'assets':[{'id':'new-card','name':'New portrait','kind':'face','character_id':'hero','description':'Asset metadata only'}]}).status_code,200)
+    applied=self.req('/api/story/apply',{'id':suggestion['id']})
+    self.assertEqual(applied.status_code,200,applied.json);self.assertEqual(applied.json['scenes'][0]['script'],'Proposed outline script')
+    self.assertEqual(self.store.get('story_projects',self.p['id'])['assets'][0]['id'],'new-card')
+ def test_proposal_rejects_real_bible_episode_and_shot_inventory_changes(self):
+  for operation,change in [('outline','canon'),('outline','characters'),('outline','episode'),('assets','assets')]:
+   with self.subTest(operation=operation,change=change):
+    suggestion=self.analyze(operation);project=self.store.get('story_projects',self.p['id'])
+    if change=='episode':
+     episode=self.store.get('story_episodes',self.ep['id']);self.req('/api/story/episode',{**episode,'brief':'New task'})
+    else:
+     if change=='canon':project['canon']='Changed approved facts'
+     elif change=='characters':project['characters'][0]['appearance']='Changed appearance'
+     else:project['assets']=[{'id':'new-card','name':'New face','kind':'face','character_id':'hero'}]
+     self.assertEqual(self.req('/api/story/project',project).status_code,200)
+    before=copy.deepcopy(self.store.rows);result=self.req('/api/story/apply',{'id':suggestion['id']})
+    self.assertEqual(result.status_code,409,result.json);self.assertEqual(self.store.rows,before)
 
 if __name__=='__main__':unittest.main()

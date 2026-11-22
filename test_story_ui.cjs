@@ -9,7 +9,8 @@ const episode={id:'ep',project_id:'p',version:1,title:'Pilot',number:1,brief:'Dr
 const storyData={projects:[project],episodes:[episode],suggestions:[]};
 const fixture={profiles,documents:[],examples:[],workspace:{id:'main',profile_id:'hf-seedance-i2v',brief:'Previous draft',parameters:{},reference_ids:[],messages:[],result:null},references:[{id:'image7',type:'image',name:'Face A file',role:'First Frame',description:''}],history:[],jobs:[],settings:{prompt:{url:'https://mock.example/v1',model:'mock'},video:{}},categories:[],user:{name:'Test',email:'test@example.com'}};
 const calls=[];
-async function storyMock(route,body){calls.push({route,body:structuredClone(body)});if(route==='story/state')return storyData;if(route==='story/project')return {...body,id:body.id||'new-project',version:(body.version||0)+1};if(route==='story/delete-asset')return {...project,assets:project.assets.filter(a=>a.id!==body.asset_id)};if(route==='story/episode')return {...body,id:body.id||'new-episode',version:(body.version||0)+1};if(route==='story/analyze'){const v={id:'suggestion',project_id:'p',episode_id:'ep',scene_id:'scene',operation:body.operation,status:'proposed',episode_version:1,result:{summary:'A proposal',synopsis:'Proposed synopsis',script:'Proposed scene',shots:[],scenes:[],issues:[],questions:['Decide this?']}};storyData.suggestions.push(v);return v;}if(route==='story/handoff')return {brief:'One shot, not an entire episode',profile_id:body.profile_id,parameters:{duration:6},reference_ids:[],reference_roles:{},story_source:{project_id:'p',episode_id:'ep',scene_id:'scene',shot_id:'shot',project_version:1,episode_version:1},warnings:['Prepare a composed first frame']};if(route==='history')return {...body,id:'draft-history'};if(route==='workspace')return body;if(route==='director')return {};throw Error('Unexpected route '+route);}
+let applyMock=async()=>episode;
+async function storyMock(route,body){calls.push({route,body:structuredClone(body)});if(route==='story/apply')return applyMock(body);if(route==='story/state')return storyData;if(route==='story/project')return {...body,id:body.id||'new-project',version:(body.version||0)+1};if(route==='story/delete-asset')return {...project,assets:project.assets.filter(a=>a.id!==body.asset_id)};if(route==='story/episode')return {...body,id:body.id||'new-episode',version:(body.version||0)+1};if(route==='story/analyze'){const v={id:'suggestion',project_id:'p',episode_id:'ep',scene_id:'scene',operation:body.operation,status:'proposed',episode_version:1,result:{summary:'A proposal',synopsis:'Proposed synopsis',script:'Proposed scene',shots:[],scenes:[],issues:[],questions:['Decide this?']}};storyData.suggestions.push(v);return v;}if(route==='story/handoff')return {brief:'One shot, not an entire episode',profile_id:body.profile_id,parameters:{duration:6},reference_ids:[],reference_roles:{},story_source:{project_id:'p',episode_id:'ep',scene_id:'scene',shot_id:'shot',project_version:1,episode_version:1},warnings:['Prepare a composed first frame']};if(route==='history')return {...body,id:'draft-history'};if(route==='workspace')return body;if(route==='director')return {};throw Error('Unexpected route '+route);}
 class TestFormData{constructor(form){this.values=new Map(Object.entries(form.values||{}));}get(k){return this.values.get(k)??null;}has(k){return this.values.has(k);}getAll(k){const v=this.get(k);return v===null?[]:[].concat(v);}}
 const sandbox={document,window:{addEventListener(){},location:{assign(){}}},navigator:{clipboard:{writeText:async()=>{}}},URL:{createObjectURL:()=>'',revokeObjectURL(){}},Blob,structuredClone,FormData:TestFormData,setTimeout:()=>0,clearTimeout(){},fixture,storyMock,storyData};vm.createContext(sandbox);
 let source=fs.readFileSync(path.join(root,'static/app.js'),'utf8');source=source.slice(0,source.lastIndexOf('(async()=>{try{S=await api('));vm.runInContext(source,sandbox);vm.runInContext('S=fixture;api=storyMock;',sandbox);vm.runInContext(fs.readFileSync(path.join(root,'static/story-ui.js'),'utf8'),sandbox);
@@ -37,5 +38,20 @@ async function form(id,dataset,values){await submit({target:{id,dataset,values,q
  await act('confirm-delete-asset','asset-a');const deletion=calls.findLast(x=>x.route==='story/delete-asset');
  assert.equal(deletion.body.version,versionAtConfirmation,'Deletion uses the version the user confirmed');assert.equal(deletion.body.asset_id,'asset-a');assert.equal(deletion.body.project_id,'p');
  assert.ok(!calls.some(x=>x.route==='delete'),'Deleting a story card never deletes a reference file');
+ await act('suggestion','suggestion');
+ applyMock=async()=>{throw Error('Сценарий изменился <unsafe>');};
+ await act('apply','suggestion');
+ assert.equal(node('#st-apply-feedback').hidden,false);assert.equal(node('#st-apply-feedback').dataset.state,'error');
+ assert.ok(node('#st-apply-feedback').textContent.includes('Сценарий изменился <unsafe>'));
+ assert.equal(node('#modal').open,true,'A failed apply keeps the proposal open with a persistent inline error');
+ assert.equal(run('ST.applying'),false);
+ let releaseApply;applyMock=()=>new Promise(resolve=>{releaseApply=resolve;});
+ const applying=act('apply','suggestion');await Promise.resolve();
+ assert.equal(node('#st-apply-feedback').dataset.state,'pending');assert.equal(run('ST.applying'),true);
+ const applyCount=calls.filter(x=>x.route==='story/apply').length;await act('apply','suggestion');
+ assert.equal(calls.filter(x=>x.route==='story/apply').length,applyCount,'Double taps do not submit twice');
+ releaseApply(episode);await applying;
+ assert.equal(node('#modal').open,false);assert.equal(run('ST.tab'),'script');assert.equal(run('ST.episodeId'),'ep');
+ assert.equal(episode.scenes[0].script,'Original script','A failed apply did not mutate local saved text');
  console.log('Story UI passed: tabs, safe rendering, correct asset identity, stale editors, reviewed proposals, draft preservation, handoff and confirmed asset deletion. No real AI/video calls.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

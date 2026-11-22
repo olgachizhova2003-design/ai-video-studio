@@ -1,5 +1,5 @@
 """Shared series bible, versioned screenplay, asset planning and shot handoff."""
-import copy,json,re,threading
+import copy,hashlib,json,re,threading
 
 ASSET_KINDS={'face':'Лицо персонажа','location':'Локация','outfit':'Одежда','prop':'Реквизит','first_frame':'Готовый первый кадр','motion':'Движение','audio':'Звук'}
 OPERATIONS={'develop':'Развить сюжет серии','outline':'Составить сцены серии','scene':'Написать сцену','shots':'Разбить сцену на кадры','review':'Проверить сценарий','assets':'Спланировать ассеты'}
@@ -199,6 +199,21 @@ class StoryEngine:
             scene.update(id=self.uid(),character_ids=self.character_ids(value.get('character_ids',[]),char_ids),shots=[])
             result.append(scene)
         return result
+    def proposal_project_hash(self,project,operation):
+        fields=['title','logline','world','canon','visual_style','open_questions','characters']
+        # Scene prose and outlines do not bind asset cards. Shot plans do use the inventory.
+        if operation in ['shots','assets']:fields.append('assets')
+        context={k:project.get(k) for k in fields}
+        return hashlib.sha256(json.dumps(context,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+    def proposal_project_unchanged(self,suggestion,project):
+        if suggestion['project_version']==project['version']:return True
+        expected=suggestion.get('project_context_hash')
+        if not expected:
+            # Existing paid suggestions predate hashes; recover their baseline from revisions.
+            previous=next((r['body'] for r in self.all('revisions') if r['kind']=='projects' and r['target_id']==project['id'] and r['version']==suggestion['project_version']),None)
+            if previous is None:return False
+            expected=self.proposal_project_hash(previous,suggestion['operation'])
+        return expected==self.proposal_project_hash(project,suggestion['operation'])
     def analyze(self,body):
         operation=body.get('operation');project=self.get('projects',body.get('project_id',''))
         if operation not in OPERATIONS:raise ValueError('Неизвестная задача сценариста')
@@ -227,6 +242,7 @@ class StoryEngine:
             if operation in ['shots','assets'] and not result['shots']:raise ValueError()
         except (KeyError,TypeError,ValueError,IndexError,AttributeError):raise ValueError('Prompt AI вернул некорректный сценарный ответ. Ваши материалы не изменены. Повторите запрос.')
         suggestion={'id':self.uid(),'project_id':project['id'],'episode_id':episode['id'],'scene_id':scene['id'] if scene else '', 'operation':operation,'project_version':project['version'],'episode_version':episode['version'],'instruction':body.get('instruction',''),'result':result,'created_at':self.now(),'status':'proposed'}
+        suggestion['project_context_hash']=self.proposal_project_hash(project,operation)
         return self.put('suggestions',suggestion)
     def strings(self,values):
         if not isinstance(values,list) or len(values)>100:raise ValueError('Некорректный список ответа')
@@ -235,7 +251,8 @@ class StoryEngine:
         with self.lock:
             suggestion=self.get('suggestions',body.get('id',''));project=self.get('projects',suggestion['project_id']);episode=self.get('episodes',suggestion['episode_id'])
             if suggestion['status']!='proposed':raise StoryConflict('Это предложение уже применено')
-            if suggestion['project_version']!=project['version'] or suggestion['episode_version']!=episode['version']:raise StoryConflict('Библия или сценарий изменились после запроса. Создайте новое предложение по актуальной версии.')
+            if suggestion['episode_version']!=episode['version']:raise StoryConflict('Сценарий серии изменился после запроса. Предложение сохранено, но не может автоматически заменить новую версию. Сравните его с текущим сценарием.')
+            if not self.proposal_project_unchanged(suggestion,project):raise StoryConflict('Библия, анкеты героев или материалы для плана кадров изменились после запроса. Предложение сохранено, но его нужно сверить с актуальными материалами перед применением.')
             operation=suggestion['operation'];result=suggestion['result']
             if operation=='develop':episode['synopsis']=result['synopsis']
             elif operation=='outline':episode['scenes']=result['scenes']
