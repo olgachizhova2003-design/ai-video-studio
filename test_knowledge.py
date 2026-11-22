@@ -81,7 +81,7 @@ class KnowledgeAcceptance(unittest.TestCase):
         self.assertTrue(any(e['id']==example['id'] for e in state['examples']));self.assertTrue(any(d['id']==doc['id'] for d in state['documents']))
     def test_backup_precedes_migration_and_original_documents_survive(self):
         snapshot=self.request('/api/knowledge-backup').json
-        self.assertEqual(len(snapshot['documents']),5);self.assertEqual(len(snapshot['profiles']),8)
+        self.assertEqual(len(snapshot['documents']),6);self.assertEqual(len(snapshot['profiles']),10)
         current={d['id']:d for d in self.state['documents']}
         for d in snapshot['documents']:self.assertEqual(current[d['id']]['content'],d['content'])
         self.assertFalse(any(key in snapshot for key in ['settings','secrets','tickets']))
@@ -98,7 +98,7 @@ class KnowledgeAcceptance(unittest.TestCase):
         store=NoBackupStore();app=create_app(self.config,store);client=app.test_client();csrf=client.get('/auth/csrf',base_url='https://studio.example').json['csrf']
         client.post('/auth/login',base_url='https://studio.example',json={'email':'alice@example.com','password':'test-password-only'},headers={'X-CSRF-Token':csrf})
         r=client.get('/api/state',base_url='https://studio.example');self.assertEqual(r.status_code,503)
-        self.assertEqual(len(store.all('documents')),5);self.assertEqual(len(store.all('examples')),0)
+        self.assertEqual(len(store.all('documents')),6);self.assertEqual(len(store.all('examples')),0)
     def test_anatomy_and_before_after_use_prompt_ai_and_always_show_ten_components(self):
         r=self.request('/api/anatomy',{'profile_id':'hf-seedance-t2v','prompt':'Девушка идёт по комнате, красиво и реалистично','operation':'improve','reference_ids':[]})
         self.assertEqual(r.status_code,200,r.json);self.assertEqual(len(r.json['anatomy']),10);self.assertNotEqual(r.json['before'],r.json['after']);self.assertTrue(r.json['context'])
