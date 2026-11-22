@@ -269,6 +269,10 @@ def test_connection(provider):
         require(bool(text.strip()),'API доступен, но модель не вернула текст ответа'+(': исчерпан лимит токенов.' if choice.get('finish_reason')=='length' else '. Причина: '+str(choice.get('finish_reason') or 'не указана')+'.'))
         return {'ok':True,'message':'Подключено · модель '+p['model']+' ответила','provider':provider}
     key,headers=provider_auth(provider)
+    if provider=='elysium':
+        data=api_request('https://elysiumai.net/v1/models',key,extra=headers,timeout=30)
+        require(isinstance(data.get('data'),list),'ElysiumAI не вернул каталог моделей: '+provider_message(data))
+        return {'ok':True,'provider':provider,'message':'Подключено · ElysiumAI вернул каталог моделей. Платная видеогенерация не запускалась.'}
     if provider=='higgsfield':
         try:api_request(HF_BASE+'/requests/00000000-0000-4000-8000-000000000000/status',key,extra=headers,timeout=30)
         except ProviderError as e:
