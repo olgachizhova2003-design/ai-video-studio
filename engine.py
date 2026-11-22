@@ -432,8 +432,14 @@ def director(body):
             for path in paths:
                 if count>=12: break
                 raw=(DATA/'media'/path).read_bytes(); require(len(raw)<=12*1024*1024,'Изображение для Prompt AI превышает 12 MB')
+                # Send a bounded vision copy; the source reference is never modified.
+                import io
+                from PIL import Image,ImageOps
+                with Image.open(io.BytesIO(raw)) as original:
+                    preview=ImageOps.exif_transpose(original).convert('RGB');preview.thumbnail((1280,1280))
+                    encoded=io.BytesIO();preview.save(encoded,format='JPEG',quality=85);raw=encoded.getvalue()
                 content.append({'type':'text','text':'Reference '+r['id']+' ('+r['role']+'), '+('keyframe' if r['type']=='video' else 'image')})
-                content.append({'type':'image_url','image_url':{'url':'data:'+('image/jpeg' if r['type']=='video' else r['mime'])+';base64,'+base64.b64encode(raw).decode()}}); count+=1
+                content.append({'type':'image_url','image_url':{'url':'data:'+'image/jpeg'+';base64,'+base64.b64encode(raw).decode()}}); count+=1
             if r['type']=='image' and not paths and r.get('remote_url'):
                 content.append({'type':'image_url','image_url':{'url':check_url(r['remote_url'])}})
     if settings.get('video'):
